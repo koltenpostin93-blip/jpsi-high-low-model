@@ -415,7 +415,8 @@ def build_seasonal_df(contracts, prefix, delivery_year_filter=None):
     return pd.DataFrame(rows)
 
 
-def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12):
+def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
+                          ind_high_pct=None, ind_low_pct=None):
     """
     Seasonal overlay chart: each historical year as a faint line,
     historical average ± 1 std dev band in green, current year in gold.
@@ -478,6 +479,24 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12):
     # Jan 1 baseline
     fig.add_hline(y=100, line_dash="dot", line_color=DM_MUTED, line_width=1,
                   annotation_text=" Jan 1 = 100%", annotation_font=dict(color=DM_MUTED, size=10))
+
+    # Indicated high / low reference lines
+    if ind_high_pct is not None:
+        fig.add_hline(
+            y=ind_high_pct,
+            line_dash="dash", line_color=COL_HIGH, line_width=1.5,
+            annotation_text=f" Indicated High {ind_high_pct:.1f}%",
+            annotation_position="right",
+            annotation_font=dict(color=COL_HIGH, size=10),
+        )
+    if ind_low_pct is not None:
+        fig.add_hline(
+            y=ind_low_pct,
+            line_dash="dash", line_color=COL_LOW, line_width=1.5,
+            annotation_text=f" Indicated Low {ind_low_pct:.1f}%",
+            annotation_position="right",
+            annotation_font=dict(color=COL_LOW, size=10),
+        )
 
     # Month tick marks — only show up to end_month
     _all_doys  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
@@ -1349,30 +1368,39 @@ with tab_seas:
         st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
 
         # ── Config per contract ───────────────────────────────
+        # ind_*_pct = indicated price as % of Jan 1 (same units as the seasonal chart)
         SEAS_CONFIG = {
             "🌽 Dec Corn (CZ26)": dict(
                 contracts=PH["corn"], prefix="ZCZ",
                 current_year=2026,
                 title="Dec Corn (CZ) — Annual Price as % of Jan 1  |  Each line = one delivery year",
                 end_month=12,
+                ind_high_pct=cz_hl_high / cz_jan1 * 100 if cz_hl_high and cz_jan1 else None,
+                ind_low_pct =cz_hl_low  / cz_jan1 * 100 if cz_hl_low  and cz_jan1 else None,
             ),
             "🌽 Jul Corn (CN26)": dict(
                 contracts=PH["corn"], prefix="ZCN",
                 current_year=2026,
                 title="Jul Corn (CN) — Annual Price as % of Jan 1  |  Each line = one delivery year",
                 end_month=7,
+                ind_high_pct=cn_hl_high / cn_jan1 * 100 if cn_hl_high and cn_jan1 else None,
+                ind_low_pct =cn_hl_low  / cn_jan1 * 100 if cn_hl_low  and cn_jan1 else None,
             ),
             "🫘 Nov Soybeans (SX26)": dict(
                 contracts=PH["soy"], prefix="ZSX",
                 current_year=2026,
                 title="Nov Soybeans (SX) — Annual Price as % of Jan 1  |  Each line = one delivery year",
                 end_month=11,
+                ind_high_pct=sx_hl_high / sx_jan1 * 100 if sx_hl_high and sx_jan1 else None,
+                ind_low_pct =sx_hl_low  / sx_jan1 * 100 if sx_hl_low  and sx_jan1 else None,
             ),
             "🫘 Jul Soybeans (SN26)": dict(
                 contracts=PH["soy"], prefix="ZSN",
                 current_year=2026,
                 title="Jul Soybeans (SN) — Annual Price as % of Jan 1  |  Each line = one delivery year",
                 end_month=7,
+                ind_high_pct=sn_hl_high / sn_jan1 * 100 if sn_hl_high and sn_jan1 else None,
+                ind_low_pct =sn_hl_low  / sn_jan1 * 100 if sn_hl_low  and sn_jan1 else None,
             ),
         }
 
@@ -1406,8 +1434,12 @@ with tab_seas:
 
             # Seasonal overlay chart
             st.plotly_chart(
-                make_seasonal_overlay(seas_df, cfg["current_year"], cfg["title"],
-                                      end_month=cfg["end_month"]),
+                make_seasonal_overlay(
+                    seas_df, cfg["current_year"], cfg["title"],
+                    end_month=cfg["end_month"],
+                    ind_high_pct=cfg.get("ind_high_pct"),
+                    ind_low_pct=cfg.get("ind_low_pct"),
+                ),
                 use_container_width=True,
             )
 
