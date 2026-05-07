@@ -118,10 +118,16 @@ div[data-testid="stDataFrame"]{{
 # ─── DATA LOADING ───────────────────────────────────────────
 DATA_PATH = Path(__file__).parent / "data" / "High Low Model.xlsx"
 
-# External price history files — update these paths as the files move/update.
-# App degrades gracefully on Streamlit Cloud where these paths don't exist.
-CORN_PRICES_PATH = Path(r"C:\Users\KoltenPostin\John Stewart and Associates\JSA - Documents\Research Analyst\Reports\Projects\Python Codes\Prices & Spreads\Corn_Futures_History.xlsx")
-SOY_PRICES_PATH  = Path(r"C:\Users\KoltenPostin\John Stewart and Associates\JSA - Documents\Research Analyst\Reports\Projects\Python Codes\Prices & Spreads\Soybean_Futures_History.xlsx")
+# External price history files — update the primary paths below as needed.
+# Fallback: app also checks the local data/ folder (drop copies there for
+# Streamlit Cloud or when the network path is unavailable).
+_CORN_PRIMARY = Path(r"C:\Users\KoltenPostin\John Stewart and Associates\JSA - Documents\Research Analyst\Reports\Projects\Python Codes\Prices & Spreads\Corn_Futures_History.xlsx")
+_SOY_PRIMARY  = Path(r"C:\Users\KoltenPostin\John Stewart and Associates\JSA - Documents\Research Analyst\Reports\Projects\Python Codes\Prices & Spreads\Soybean_Futures_History.xlsx")
+_CORN_LOCAL   = Path(__file__).parent / "data" / "Corn_Futures_History.xlsx"
+_SOY_LOCAL    = Path(__file__).parent / "data" / "Soybean_Futures_History.xlsx"
+
+CORN_PRICES_PATH = _CORN_PRIMARY if _CORN_PRIMARY.exists() else _CORN_LOCAL
+SOY_PRICES_PATH  = _SOY_PRIMARY  if _SOY_PRIMARY.exists()  else _SOY_LOCAL
 
 
 def _parse_year(v):
