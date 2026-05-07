@@ -277,28 +277,22 @@ def _load_sn(wb, name, is_low):
 # ─── COMPUTATION HELPERS ────────────────────────────────────
 
 def rank_df(df, ratio_col, current_ratio, current_jan1):
-    """Filter est rows, rank by proximity to current ratio, add indicated price and weight."""
+    """Filter est rows, rank by proximity to current ratio, add indicated price."""
     d = df[~df["is_est"]].copy()
     d["distance"] = (d[ratio_col] - current_ratio).abs()
     d = d.sort_values("distance").reset_index(drop=True)
     d.index = d.index + 1
-    d["weight"]    = 1.0 / (d["distance"] + 1e-4)   # 1/distance weight; epsilon avoids ÷0
     d["indicated"] = (d["price_pct"] * current_jan1).round(2)
     return d
 
 
-def headline(df, ratio_col, current_ratio, current_jan1, weighted=False):
-    """Return (indicated_price, pct, top5_indicated_price) using simple or weighted median."""
+def headline(df, ratio_col, current_ratio, current_jan1):
+    """Return (median_indicated_price, median_pct, top5_indicated_price)."""
     d = rank_df(df, ratio_col, current_ratio, current_jan1)
     if d.empty:
         return None, None, None
-    if weighted:
-        med_pct  = weighted_median(d["price_pct"].tolist(), d["weight"].tolist())
-        t5       = d.head(5)
-        top5_pct = weighted_median(t5["price_pct"].tolist(), t5["weight"].tolist())
-    else:
-        med_pct  = d["price_pct"].median()
-        top5_pct = d.head(5)["price_pct"].median()
+    med_pct  = d["price_pct"].median()
+    top5_pct = d.head(5)["price_pct"].median()
     return round(med_pct * current_jan1, 2), med_pct, round(top5_pct * current_jan1, 2)
 
 
@@ -310,17 +304,6 @@ def fmt_price(p):
     """Display price in $/bu (inputs are in ¢/bu, divide by 100)."""
     return f"${p/100:.2f}/bu" if p is not None else "—"
 
-
-def weighted_median(values, weights):
-    """Compute a weighted median given parallel lists of values and weights."""
-    pairs = sorted(zip(values, weights), key=lambda x: x[0])
-    total = sum(w for _, w in pairs)
-    cumul = 0.0
-    for val, w in pairs:
-        cumul += w
-        if cumul >= total / 2:
-            return val
-    return pairs[-1][0]
 
 
 # ─── SECTION EMOJI MAP ──────────────────────────────────────
@@ -486,7 +469,6 @@ sx_section   = st.session_state.get("sx_section", "Prod ≥ Prev Yr Use")
 sn_jan1      = st.session_state.get("sn_jan1",    1072.00)
 sn_co_raw    = st.session_state.get("sn_co",         29.5)
 sn_section   = st.session_state.get("sn_section", "No Crop Scare")
-use_weighted = st.session_state.get("method_radio", "Simple Median") == "Weighted Median"
 
 cz_ratio  = cz_prod / cz_use if cz_use else 0.0
 cn_co_pct = cn_co_raw / 100
@@ -510,17 +492,14 @@ except Exception as e:
 
 
 # ─── HEADLINE COMPUTATIONS ──────────────────────────────────
-w = use_weighted  # shorthand
-cz_hl_low,  cz_lp,  cz_t5_low  = headline(D["cz_low"],  "ratio",        cz_ratio,  cz_jan1, weighted=w)
-cz_hl_high, cz_hp,  cz_t5_high = headline(D["cz_high"], "ratio",        cz_ratio,  cz_jan1, weighted=w)
-cn_hl_low,  cn_lp,  cn_t5_low  = headline(D["cn_low"],  "carryout_pct", cn_co_pct, cn_jan1, weighted=w)
-cn_hl_high, cn_hp,  cn_t5_high = headline(D["cn_high"], "carryout_pct", cn_co_pct, cn_jan1, weighted=w)
-sx_hl_low,  sx_lp,  sx_t5_low  = headline(D["sx_low"],  "carryout_pct", sx_co_pct, sx_jan1, weighted=w)
-sx_hl_high, sx_hp,  sx_t5_high = headline(D["sx_high"], "carryout_pct", sx_co_pct, sx_jan1, weighted=w)
-sn_hl_low,  sn_lp,  sn_t5_low  = headline(D["sn_low"],  "carryout_pct", sn_co_pct, sn_jan1, weighted=w)
-sn_hl_high, sn_hp,  sn_t5_high = headline(D["sn_high"], "carryout_pct", sn_co_pct, sn_jan1, weighted=w)
-
-METHOD_LABEL = "Weighted Median" if use_weighted else "Simple Median"
+cz_hl_low,  cz_lp,  cz_t5_low  = headline(D["cz_low"],  "ratio",        cz_ratio,  cz_jan1)
+cz_hl_high, cz_hp,  cz_t5_high = headline(D["cz_high"], "ratio",        cz_ratio,  cz_jan1)
+cn_hl_low,  cn_lp,  cn_t5_low  = headline(D["cn_low"],  "carryout_pct", cn_co_pct, cn_jan1)
+cn_hl_high, cn_hp,  cn_t5_high = headline(D["cn_high"], "carryout_pct", cn_co_pct, cn_jan1)
+sx_hl_low,  sx_lp,  sx_t5_low  = headline(D["sx_low"],  "carryout_pct", sx_co_pct, sx_jan1)
+sx_hl_high, sx_hp,  sx_t5_high = headline(D["sx_high"], "carryout_pct", sx_co_pct, sx_jan1)
+sn_hl_low,  sn_lp,  sn_t5_low  = headline(D["sn_low"],  "carryout_pct", sn_co_pct, sn_jan1)
+sn_hl_high, sn_hp,  sn_t5_high = headline(D["sn_high"], "carryout_pct", sn_co_pct, sn_jan1)
 
 
 # ─── SEASONALITY CHART ──────────────────────────────────────
@@ -607,15 +586,13 @@ tab_ov, tab_inp, tab_cz, tab_cn, tab_sx, tab_sn = st.tabs([
 # ══════════════════════════════════════════════════════════════
 with tab_ov:
     st.markdown(
-        f'<div class="sec-hdr">📌 Indicated Price Range — Current Marketing Year'
-        f'<span style="font-size:0.72rem;font-weight:400;color:{COL_GOLD};margin-left:12px;">'
-        f'Method: {METHOD_LABEL}</span></div>',
+        '<div class="sec-hdr">📌 Indicated Price Range — Current Marketing Year</div>',
         unsafe_allow_html=True,
     )
 
     # Row 1: Lows
     st.markdown(
-        f'<div class="hl-row-label">📉 Indicated Lows ({METHOD_LABEL} of All Historical Years × Current Jan 1 Price)</div>',
+        '<div class="hl-row-label">📉 Indicated Lows (Median of All Historical Years × Current Jan 1 Price)</div>',
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4 = st.columns(4)
@@ -628,7 +605,7 @@ with tab_ov:
 
     # Row 2: Highs
     st.markdown(
-        f'<div class="hl-row-label">📈 Indicated Highs ({METHOD_LABEL} of All Historical Years × Current Jan 1 Price)</div>',
+        '<div class="hl-row-label">📈 Indicated Highs (Median of All Historical Years × Current Jan 1 Price)</div>',
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4 = st.columns(4)
@@ -704,33 +681,6 @@ with tab_inp:
         f'<div class="sec-hdr">⚙️ Current Year Assumptions</div>'
         f'<div style="color:{DM_MUTED};font-size:0.82rem;margin-bottom:20px;">'
         f'Update these values to recalculate all indicated highs and lows across every contract.</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Model Method ─────────────────────────────────────────
-    st.markdown(
-        f'<div class="input-card-title" style="border-left:4px solid {JSA_LT};'
-        f'padding-left:10px;font-size:1.0rem;font-weight:600;margin-bottom:12px;">'
-        f'📐 Model Method</div>',
-        unsafe_allow_html=True,
-    )
-    method_choice = st.radio(
-        "Indicated price calculation method",
-        options=["Simple Median", "Weighted Median"],
-        index=1 if use_weighted else 0,
-        horizontal=True,
-        key="method_radio",
-        help=(
-            "Simple Median: all historical years count equally.\n\n"
-            "Weighted Median: years whose supply ratio is closest to the current year "
-            "receive higher weight (weight = 1 / distance), so the nearest analogs "
-            "drive the indicated price more than distant ones."
-        ),
-    )
-    st.markdown(
-        f'<div style="color:{DM_MUTED};font-size:0.78rem;margin:6px 0 22px;">'
-        f'Currently active: <b style="color:{COL_GOLD};">{METHOD_LABEL}</b> — '
-        f'switch and the page will recalculate immediately.</div>',
         unsafe_allow_html=True,
     )
 
