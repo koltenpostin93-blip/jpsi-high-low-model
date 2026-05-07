@@ -277,22 +277,28 @@ def _load_sn(wb, name, is_low):
 # ─── COMPUTATION HELPERS ────────────────────────────────────
 
 def rank_df(df, ratio_col, current_ratio, current_jan1):
-    """Filter est rows, rank by proximity to current ratio, add indicated price."""
+    """Filter est rows, rank by proximity to current ratio, add indicated price and weight."""
     d = df[~df["is_est"]].copy()
     d["distance"] = (d[ratio_col] - current_ratio).abs()
     d = d.sort_values("distance").reset_index(drop=True)
     d.index = d.index + 1
+    d["weight"]    = 1.0 / (d["distance"] + 1e-4)   # 1/distance weight; epsilon avoids ÷0
     d["indicated"] = (d["price_pct"] * current_jan1).round(2)
     return d
 
 
-def headline(df, ratio_col, current_ratio, current_jan1):
-    """Return (median_indicated_price, median_pct, top5_indicated_price)."""
+def headline(df, ratio_col, current_ratio, current_jan1, weighted=False):
+    """Return (indicated_price, pct, top5_indicated_price) using simple or weighted median."""
     d = rank_df(df, ratio_col, current_ratio, current_jan1)
     if d.empty:
         return None, None, None
-    med_pct  = d["price_pct"].median()
-    top5_pct = d.head(5)["price_pct"].median()
+    if weighted:
+        med_pct  = weighted_median(d["price_pct"].tolist(), d["weight"].tolist())
+        t5       = d.head(5)
+        top5_pct = weighted_median(t5["price_pct"].tolist(), t5["weight"].tolist())
+    else:
+        med_pct  = d["price_pct"].median()
+        top5_pct = d.head(5)["price_pct"].median()
     return round(med_pct * current_jan1, 2), med_pct, round(top5_pct * current_jan1, 2)
 
 
@@ -303,6 +309,18 @@ def fmt_pct(p):
 def fmt_price(p):
     """Display price in $/bu (inputs are in ¢/bu, divide by 100)."""
     return f"${p/100:.2f}/bu" if p is not None else "—"
+
+
+def weighted_median(values, weights):
+    """Compute a weighted median given parallel lists of values and weights."""
+    pairs = sorted(zip(values, weights), key=lambda x: x[0])
+    total = sum(w for _, w in pairs)
+    cumul = 0.0
+    for val, w in pairs:
+        cumul += w
+        if cumul >= total / 2:
+            return val
+    return pairs[-1][0]
 
 
 # ─── SECTION EMOJI MAP ──────────────────────────────────────
@@ -457,17 +475,18 @@ def headline_tile(contract, label, price, pct, top5, kind):
 # Overview tab. Reading from session_state here means any change in the
 # Assumptions tab triggers a full re-run with updated values everywhere.
 
-cz_jan1    = st.session_state.get("cz_jan1",    458.50)
-cz_prod    = st.session_state.get("cz_prod",  15979.0)
-cz_use     = st.session_state.get("cz_use",   16120.0)
-cn_jan1    = st.session_state.get("cn_jan1",    452.00)
-cn_co_raw  = st.session_state.get("cn_co",       12.9)
-sx_jan1    = st.session_state.get("sx_jan1",   1062.75)
-sx_co_raw  = st.session_state.get("sx_co",       28.4)
-sx_section = st.session_state.get("sx_section", "Prod ≥ Prev Yr Use")
-sn_jan1    = st.session_state.get("sn_jan1",   1072.00)
-sn_co_raw  = st.session_state.get("sn_co",       29.5)
-sn_section = st.session_state.get("sn_section", "No Crop Scare")
+cz_jan1      = st.session_state.get("cz_jan1",      458.50)
+cz_prod      = st.session_state.get("cz_prod",    15979.0)
+cz_use       = st.session_state.get("cz_use",     16120.0)
+cn_jan1      = st.session_state.get("cn_jan1",      452.00)
+cn_co_raw    = st.session_state.get("cn_co",         12.9)
+sx_jan1      = st.session_state.get("sx_jan1",    1062.75)
+sx_co_raw    = st.session_state.get("sx_co",         28.4)
+sx_section   = st.session_state.get("sx_section", "Prod ≥ Prev Yr Use")
+sn_jan1      = st.session_state.get("sn_jan1",    1072.00)
+sn_co_raw    = st.session_state.get("sn_co",         29.5)
+sn_section   = st.session_state.get("sn_section", "No Crop Scare")
+use_weighted = st.session_state.get("use_weighted", False)
 
 cz_ratio  = cz_prod / cz_use if cz_use else 0.0
 cn_co_pct = cn_co_raw / 100
@@ -491,14 +510,62 @@ except Exception as e:
 
 
 # ─── HEADLINE COMPUTATIONS ──────────────────────────────────
-cz_hl_low,  cz_lp,  cz_t5_low  = headline(D["cz_low"],  "ratio",        cz_ratio,  cz_jan1)
-cz_hl_high, cz_hp,  cz_t5_high = headline(D["cz_high"], "ratio",        cz_ratio,  cz_jan1)
-cn_hl_low,  cn_lp,  cn_t5_low  = headline(D["cn_low"],  "carryout_pct", cn_co_pct, cn_jan1)
-cn_hl_high, cn_hp,  cn_t5_high = headline(D["cn_high"], "carryout_pct", cn_co_pct, cn_jan1)
-sx_hl_low,  sx_lp,  sx_t5_low  = headline(D["sx_low"],  "carryout_pct", sx_co_pct, sx_jan1)
-sx_hl_high, sx_hp,  sx_t5_high = headline(D["sx_high"], "carryout_pct", sx_co_pct, sx_jan1)
-sn_hl_low,  sn_lp,  sn_t5_low  = headline(D["sn_low"],  "carryout_pct", sn_co_pct, sn_jan1)
-sn_hl_high, sn_hp,  sn_t5_high = headline(D["sn_high"], "carryout_pct", sn_co_pct, sn_jan1)
+w = use_weighted  # shorthand
+cz_hl_low,  cz_lp,  cz_t5_low  = headline(D["cz_low"],  "ratio",        cz_ratio,  cz_jan1, weighted=w)
+cz_hl_high, cz_hp,  cz_t5_high = headline(D["cz_high"], "ratio",        cz_ratio,  cz_jan1, weighted=w)
+cn_hl_low,  cn_lp,  cn_t5_low  = headline(D["cn_low"],  "carryout_pct", cn_co_pct, cn_jan1, weighted=w)
+cn_hl_high, cn_hp,  cn_t5_high = headline(D["cn_high"], "carryout_pct", cn_co_pct, cn_jan1, weighted=w)
+sx_hl_low,  sx_lp,  sx_t5_low  = headline(D["sx_low"],  "carryout_pct", sx_co_pct, sx_jan1, weighted=w)
+sx_hl_high, sx_hp,  sx_t5_high = headline(D["sx_high"], "carryout_pct", sx_co_pct, sx_jan1, weighted=w)
+sn_hl_low,  sn_lp,  sn_t5_low  = headline(D["sn_low"],  "carryout_pct", sn_co_pct, sn_jan1, weighted=w)
+sn_hl_high, sn_hp,  sn_t5_high = headline(D["sn_high"], "carryout_pct", sn_co_pct, sn_jan1, weighted=w)
+
+METHOD_LABEL = "Weighted Median" if use_weighted else "Simple Median"
+
+
+# ─── SEASONALITY CHART ──────────────────────────────────────
+
+MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
+def make_seasonality_chart(df_low, df_high, title):
+    """Bar chart: how often does the annual high/low fall in each calendar month."""
+    def month_counts(df):
+        dates = df[~df["is_est"]]["date"]
+        months = dates.apply(lambda x: x.month if (pd.notna(x) and isinstance(x, datetime)) else None).dropna()
+        counts = [int((months == m).sum()) for m in range(1, 13)]
+        return counts
+
+    low_counts  = month_counts(df_low)
+    high_counts = month_counts(df_high)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=MONTH_LABELS, y=low_counts,
+        name="Annual Low",
+        marker_color=COL_LOW,
+        marker_line=dict(width=0),
+    ))
+    fig.add_trace(go.Bar(
+        x=MONTH_LABELS, y=high_counts,
+        name="Annual High",
+        marker_color=COL_HIGH,
+        marker_line=dict(width=0),
+    ))
+    fig.update_layout(
+        title=dict(text=title, font=dict(color=DM_TEXT, size=12), x=0),
+        barmode="group",
+        plot_bgcolor=DM_SURFACE2,
+        paper_bgcolor=DM_SURFACE2,
+        font=dict(color=DM_TEXT, family="Arial"),
+        xaxis=dict(title="Month", gridcolor=DM_BORDER, color=DM_MUTED, zeroline=False),
+        yaxis=dict(title="Number of Years", gridcolor=DM_BORDER, color=DM_MUTED,
+                   zeroline=False, dtick=1),
+        legend=dict(bgcolor=DM_SURFACE, bordercolor=DM_BORDER, borderwidth=1,
+                    font=dict(color=DM_TEXT, size=10)),
+        height=320,
+        margin=dict(l=50, r=20, t=40, b=50),
+    )
+    return fig
 
 
 # ─── PAGE HEADER ────────────────────────────────────────────
@@ -539,12 +606,16 @@ tab_ov, tab_inp, tab_cz, tab_cn, tab_sx, tab_sn = st.tabs([
 # OVERVIEW TAB — headline price tiles
 # ══════════════════════════════════════════════════════════════
 with tab_ov:
-    st.markdown('<div class="sec-hdr">📌 Indicated Price Range — Current Marketing Year</div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="sec-hdr">📌 Indicated Price Range — Current Marketing Year'
+        f'<span style="font-size:0.72rem;font-weight:400;color:{COL_GOLD};margin-left:12px;">'
+        f'Method: {METHOD_LABEL}</span></div>',
+        unsafe_allow_html=True,
+    )
 
     # Row 1: Lows
     st.markdown(
-        '<div class="hl-row-label">📉 Indicated Lows (Median of All Historical Years × Current Jan 1 Price)</div>',
+        f'<div class="hl-row-label">📉 Indicated Lows ({METHOD_LABEL} of All Historical Years × Current Jan 1 Price)</div>',
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4 = st.columns(4)
@@ -557,7 +628,7 @@ with tab_ov:
 
     # Row 2: Highs
     st.markdown(
-        '<div class="hl-row-label">📈 Indicated Highs (Median of All Historical Years × Current Jan 1 Price)</div>',
+        f'<div class="hl-row-label">📈 Indicated Highs ({METHOD_LABEL} of All Historical Years × Current Jan 1 Price)</div>',
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4 = st.columns(4)
@@ -633,6 +704,35 @@ with tab_inp:
         f'<div class="sec-hdr">⚙️ Current Year Assumptions</div>'
         f'<div style="color:{DM_MUTED};font-size:0.82rem;margin-bottom:20px;">'
         f'Update these values to recalculate all indicated highs and lows across every contract.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Model Method ─────────────────────────────────────────
+    st.markdown(
+        f'<div class="input-card-title" style="border-left:4px solid {JSA_LT};'
+        f'padding-left:10px;font-size:1.0rem;font-weight:600;margin-bottom:12px;">'
+        f'📐 Model Method</div>',
+        unsafe_allow_html=True,
+    )
+    method_choice = st.radio(
+        "Indicated price calculation method",
+        options=["Simple Median", "Weighted Median"],
+        index=1 if use_weighted else 0,
+        horizontal=True,
+        key="method_radio",
+        help=(
+            "Simple Median: all historical years count equally.\n\n"
+            "Weighted Median: years whose supply ratio is closest to the current year "
+            "receive higher weight (weight = 1 / distance), so the nearest analogs "
+            "drive the indicated price more than distant ones."
+        ),
+    )
+    # Write the boolean back into session_state so it's picked up on next rerun
+    st.session_state["use_weighted"] = (method_choice == "Weighted Median")
+    st.markdown(
+        f'<div style="color:{DM_MUTED};font-size:0.78rem;margin:6px 0 22px;">'
+        f'Currently active: <b style="color:{COL_GOLD};">{METHOD_LABEL}</b> — '
+        f'switch and the page will recalculate immediately.</div>',
         unsafe_allow_html=True,
     )
 
@@ -786,6 +886,13 @@ with tab_cz:
         use_container_width=True,
     )
 
+    st.markdown("#### Timing: Month of Annual High / Low (Historical Frequency)")
+    st.plotly_chart(
+        make_seasonality_chart(D["cz_low"], D["cz_high"],
+                               "Dec Corn — Month When Annual High or Low Typically Occurs"),
+        use_container_width=True,
+    )
+
     col_l, col_h = st.columns(2)
     with col_l:
         tbl = build_display_table(D["cz_low"], "ratio", "Prod/Use %",
@@ -843,6 +950,13 @@ with tab_cn:
         use_container_width=True,
     )
 
+    st.markdown("#### Timing: Month of Annual High / Low (Historical Frequency)")
+    st.plotly_chart(
+        make_seasonality_chart(D["cn_low"], D["cn_high"],
+                               "Jul Corn — Month When Annual High or Low Typically Occurs"),
+        use_container_width=True,
+    )
+
     col_l, col_h = st.columns(2)
     with col_l:
         tbl = build_display_table(D["cn_low"], "carryout_pct", "Carryout %",
@@ -893,6 +1007,13 @@ with tab_sx:
         make_scatter(D["sx_low"], D["sx_high"], "carryout_pct",
                      "World C/O % of Use", sx_co_pct,
                      "Nov Soybeans: World C/O/Use vs Jan–Nov High/Low as % of Jan 1"),
+        use_container_width=True,
+    )
+
+    st.markdown("#### Timing: Month of Annual High / Low (Historical Frequency)")
+    st.plotly_chart(
+        make_seasonality_chart(D["sx_low"], D["sx_high"],
+                               "Nov Soybeans — Month When Annual High or Low Typically Occurs"),
         use_container_width=True,
     )
 
@@ -954,6 +1075,13 @@ with tab_sn:
         make_scatter(D["sn_low"], D["sn_high"], "carryout_pct",
                      "World C/O % of Use", sn_co_pct,
                      "Jul Soybeans: World C/O/Use vs Jan–Jul High/Low as % of Jan 1"),
+        use_container_width=True,
+    )
+
+    st.markdown("#### Timing: Month of Annual High / Low (Historical Frequency)")
+    st.plotly_chart(
+        make_seasonality_chart(D["sn_low"], D["sn_high"],
+                               "Jul Soybeans — Month When Annual High or Low Typically Occurs"),
         use_container_width=True,
     )
 
