@@ -418,121 +418,134 @@ def build_seasonal_df(contracts, prefix, delivery_year_filter=None):
 def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
                           ind_high_pct=None, ind_low_pct=None, jan1_price=None):
     """
-    MRCI-style seasonal chart:
-    - Faint grey lines for every historical year
-    - Full-history smoothed avg (green) + ±1 SD band
-    - 5-year smoothed avg (coral dashed)
-    - Current year as thick gold line
-    - Dual y-axis: left = % of Jan 1, right = $/bu (if jan1_price provided)
-    - Vertical highlight band at today's date
-    - Dashed H/L reference lines
+    MRCI-style top-chart: everything plotted in actual $/bu.
+    Historical years are rescaled to the current Jan 1 price so they all
+    start at the same level (price_pct * jan1_price / 100 / 100 → $/bu).
+    Averages (full, 5-yr, 15-yr) are drawn the same way.
+    Current year uses its actual closing prices directly.
     """
+    # ¢/bu → $/bu conversion factor
+    j = (jan1_price or 100) / 100 / 100   # jan1_price in ¢ → $/bu
+
+    def pct_to_price(pct_series):
+        """Convert price_pct values to $/bu scaled to current Jan 1."""
+        return pct_series * j
+
     fig = go.Figure()
 
     hist = seasonal_df[seasonal_df["year"] != current_year]
     curr = seasonal_df[seasonal_df["year"] == current_year]
 
-    # ── Faint historical year lines ──────────────────────────
+    # ── Faint historical year lines (rescaled to current Jan 1) ──
     for yr, g in hist.groupby("year"):
         g = g.sort_values("doy")
         fig.add_trace(go.Scatter(
-            x=g["doy"], y=g["price_pct"],
+            x=g["doy"], y=pct_to_price(g["price_pct"]),
             mode="lines",
-            line=dict(width=0.6, color="rgba(120,140,130,0.18)"),
+            line=dict(width=0.6, color="rgba(120,140,130,0.20)"),
             name=str(yr), showlegend=False,
-            hovertemplate=f"<b>{yr}</b>  %{{y:.1f}}% of Jan 1<extra></extra>",
+            hovertemplate=f"<b>{yr}</b>  $%{{y:.4f}}/bu<extra></extra>",
         ))
 
-    # ── Helper: smoothed group average ───────────────────────
-    def _smooth_avg(df):
-        raw = df.groupby("doy")["price_pct"].mean()
-        return raw.rolling(window=7, center=True, min_periods=1).mean()
+    # ── Helper: smoothed average in $/bu ─────────────────────
+    def _smooth(series):
+        return series.rolling(window=7, center=True, min_periods=1).mean()
 
-    def _smooth_std(df):
-        raw = df.groupby("doy")["price_pct"].std().fillna(0)
-        return raw.rolling(window=7, center=True, min_periods=1).mean()
+    def _avg_price(df):
+        return _smooth(df.groupby("doy")["price_pct"].mean()).apply(lambda v: v * j)
+
+    def _std_price(df):
+        return _smooth(df.groupby("doy")["price_pct"].std().fillna(0)).apply(lambda v: v * j)
 
     # ── Full-history avg ± 1 SD band ─────────────────────────
-    avg_full = _smooth_avg(hist)
-    std_full = _smooth_std(hist)
-    doys = avg_full.index.tolist()
-    n_full = hist["year"].nunique()
+    avg_full = _avg_price(hist)
+    std_full = _std_price(hist)
+    doys     = avg_full.index.tolist()
+    n_full   = hist["year"].nunique()
 
     fig.add_trace(go.Scatter(
         x=doys + doys[::-1],
         y=list(avg_full + std_full) + list((avg_full - std_full).iloc[::-1]),
         fill="toself", fillcolor="rgba(94,113,100,0.15)",
-        line=dict(width=0), name="±1 SD (Full)", hoverinfo="skip",
+        line=dict(width=0), name="±1 SD", hoverinfo="skip",
     ))
     fig.add_trace(go.Scatter(
         x=doys, y=avg_full.values, mode="lines",
         line=dict(width=2, color=JSA_LT),
         name=f"Full Avg ({n_full} yr)",
-        hovertemplate="Full avg: %{y:.1f}%<extra></extra>",
+        hovertemplate="Full avg: $%{y:.2f}/bu<extra></extra>",
     ))
 
     # ── 5-year avg ───────────────────────────────────────────
     hist5 = hist[hist["year"] >= current_year - 5]
     if hist5["year"].nunique() >= 3:
-        avg5 = _smooth_avg(hist5)
+        avg5 = _avg_price(hist5)
         fig.add_trace(go.Scatter(
             x=avg5.index.tolist(), y=avg5.values, mode="lines",
             line=dict(width=1.8, color=COL_RED, dash="dash"),
             name="5-Yr Avg",
-            hovertemplate="5-yr avg: %{y:.1f}%<extra></extra>",
+            hovertemplate="5-yr avg: $%{y:.2f}/bu<extra></extra>",
         ))
 
     # ── 15-year avg ──────────────────────────────────────────
     hist15 = hist[hist["year"] >= current_year - 15]
     if hist15["year"].nunique() >= 5:
-        avg15 = _smooth_avg(hist15)
+        avg15 = _avg_price(hist15)
         fig.add_trace(go.Scatter(
             x=avg15.index.tolist(), y=avg15.values, mode="lines",
             line=dict(width=1.8, color=COL_LOW, dash="dot"),
             name="15-Yr Avg",
-            hovertemplate="15-yr avg: %{y:.1f}%<extra></extra>",
+            hovertemplate="15-yr avg: $%{y:.2f}/bu<extra></extra>",
         ))
 
-    # ── Current year (thick gold) ─────────────────────────────
+    # ── Current year — actual closing prices ─────────────────
     if not curr.empty:
         curr = curr.sort_values("doy")
+        # Use raw close price directly (already in ¢/bu → convert to $/bu)
         fig.add_trace(go.Scatter(
-            x=curr["doy"], y=curr["price_pct"], mode="lines",
+            x=curr["doy"], y=curr["close_raw"] / 100,
+            mode="lines",
             line=dict(width=2.8, color=COL_GOLD),
             name=f"{current_year}  (Current)",
-            hovertemplate=f"<b>{current_year}</b>  %{{y:.1f}}% of Jan 1<extra></extra>",
+            hovertemplate=f"<b>{current_year}</b>  $%{{y:.2f}}/bu<extra></extra>",
         ))
 
     # ── Today vertical band ───────────────────────────────────
     today_doy = datetime.now().timetuple().tm_yday
     fig.add_vrect(
         x0=today_doy - 2, x1=today_doy + 2,
-        fillcolor="rgba(100,180,200,0.18)", line_width=0,
+        fillcolor="rgba(100,180,200,0.20)", line_width=0,
         annotation_text="Today", annotation_position="top",
         annotation_font=dict(color=DM_MUTED, size=9),
     )
 
     # ── Jan 1 baseline ────────────────────────────────────────
-    fig.add_hline(y=100, line_dash="dot", line_color=DM_MUTED, line_width=1,
-                  annotation_text=" Jan 1", annotation_font=dict(color=DM_MUTED, size=9))
+    fig.add_hline(
+        y=(jan1_price or 100) / 100,
+        line_dash="dot", line_color=DM_MUTED, line_width=1,
+        annotation_text=f" Jan 1  ${(jan1_price or 100)/100:.2f}",
+        annotation_font=dict(color=DM_MUTED, size=9),
+    )
 
-    # ── Indicated H/L lines ───────────────────────────────────
+    # ── Indicated H/L lines (convert pct → $/bu) ─────────────
     if ind_high_pct is not None:
+        ind_high_price = ind_high_pct / 100 * j
         fig.add_hline(
-            y=ind_high_pct, line_dash="dash", line_color=COL_HIGH, line_width=1.5,
-            annotation_text=f" Ind. High {ind_high_pct:.1f}%",
+            y=ind_high_price, line_dash="dash", line_color=COL_HIGH, line_width=1.5,
+            annotation_text=f" Ind. High  ${ind_high_price:.2f}",
             annotation_position="right",
             annotation_font=dict(color=COL_HIGH, size=10),
         )
     if ind_low_pct is not None:
+        ind_low_price = ind_low_pct / 100 * j
         fig.add_hline(
-            y=ind_low_pct, line_dash="dash", line_color=COL_LOW, line_width=1.5,
-            annotation_text=f" Ind. Low {ind_low_pct:.1f}%",
+            y=ind_low_price, line_dash="dash", line_color=COL_LOW, line_width=1.5,
+            annotation_text=f" Ind. Low  ${ind_low_price:.2f}",
             annotation_position="right",
             annotation_font=dict(color=COL_LOW, size=10),
         )
 
-    # ── Axis config ───────────────────────────────────────────
+    # ── Axes & layout ─────────────────────────────────────────
     _all_doys  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
     _all_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     month_doys  = [d for d, m in zip(_all_doys, range(1, 13)) if m <= end_month]
@@ -540,25 +553,7 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
     _month_end_doy = [31,59,90,120,151,181,212,243,273,304,334,365]
     x_max = _month_end_doy[end_month - 1] + 5
 
-    # Right axis: actual $/bu ticks derived from % × Jan 1 price
-    if jan1_price:
-        all_pcts = seasonal_df["price_pct"].dropna()
-        y_lo = max(50, int(all_pcts.min() * 100) - 5)
-        y_hi = min(200, int(all_pcts.max() * 100) + 5)
-        pct_ticks = list(range(y_lo, y_hi + 1, 5))
-        dollar_labels = [f"${p/100 * jan1_price/100:.2f}" for p in pct_ticks]
-        yaxis2 = dict(
-            title="Price ($/bu)", overlaying="y", side="right",
-            tickvals=pct_ticks, ticktext=dollar_labels,
-            gridcolor="rgba(0,0,0,0)", color=DM_MUTED, zeroline=False,
-            range=[y_lo, y_hi],
-        )
-        yaxis_range = [y_lo, y_hi]
-    else:
-        yaxis2 = None
-        yaxis_range = None
-
-    layout = dict(
+    fig.update_layout(
         title=dict(text=title, font=dict(color=DM_TEXT, size=12), x=0),
         plot_bgcolor=DM_SURFACE2, paper_bgcolor=DM_SURFACE2,
         font=dict(color=DM_TEXT, family="Arial"),
@@ -568,18 +563,14 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
             range=[1, x_max],
         ),
         yaxis=dict(
-            title="% of Jan 1", gridcolor=DM_BORDER, color=DM_MUTED,
-            zeroline=False, ticksuffix="%", range=yaxis_range,
+            title="Price ($/bu)", gridcolor=DM_BORDER, color=DM_MUTED,
+            zeroline=False, tickprefix="$",
         ),
         legend=dict(bgcolor=DM_SURFACE, bordercolor=DM_BORDER, borderwidth=1,
                     font=dict(color=DM_TEXT, size=10)),
         height=500,
-        margin=dict(l=60, r=80, t=45, b=50),
+        margin=dict(l=70, r=120, t=45, b=50),
     )
-    if yaxis2:
-        layout["yaxis2"] = yaxis2
-
-    fig.update_layout(**layout)
     return fig
 
 
@@ -1492,11 +1483,12 @@ with tab_seas:
             curr_last = curr_df["price_pct"].iloc[-1] if not curr_df.empty else None
 
             mc1, mc2, mc3, mc4 = st.columns(4)
+            j = cfg.get("jan1_price", 100) / 100 / 100
             mc1.metric("Historical Years",    f"{n_years}")
-            mc2.metric("Avg Seasonal High",   f"{avg_high:.1f}% of Jan 1")
-            mc3.metric("Avg Seasonal Low",    f"{avg_low:.1f}% of Jan 1")
+            mc2.metric("Avg Seasonal High",   f"${avg_high/100 * cfg.get('jan1_price',100)/100:.2f}/bu")
+            mc3.metric("Avg Seasonal Low",    f"${avg_low/100  * cfg.get('jan1_price',100)/100:.2f}/bu")
             if curr_last is not None:
-                mc4.metric("Current Yr (Latest)", f"{curr_last:.1f}% of Jan 1")
+                mc4.metric("Current Yr (Latest)", f"${curr_last/100 * cfg.get('jan1_price',100)/100:.2f}/bu")
             else:
                 mc4.metric("Current Yr (Latest)", "No data yet")
 
