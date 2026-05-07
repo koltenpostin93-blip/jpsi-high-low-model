@@ -307,7 +307,8 @@ def fmt_pct(p):
 
 
 def fmt_price(p):
-    return f"{p:.2f}¢" if p is not None else "—"
+    """Display price in $/bu (inputs are in ¢/bu, divide by 100)."""
+    return f"${p/100:.2f}/bu" if p is not None else "—"
 
 
 # ─── SECTION EMOJI MAP ──────────────────────────────────────
@@ -349,7 +350,7 @@ def build_display_table(df, ratio_col, ratio_label, current_ratio, current_jan1,
     out["Jan 1 (¢/bu)"]      = d["jan1"].round(2)
     out[price_col_label]      = d["price"].round(2)
     out["% of Jan 1"]         = (d["price_pct"] * 100).round(1).astype(str) + "%"
-    out[f"Indicated @ {current_jan1:.2f}¢"] = d["indicated"]
+    out["Indicated ($/bu)"]   = (d["indicated"] / 100).round(4)
     out["Date of H/L"]        = d["date"].apply(
         lambda x: x.strftime("%m/%d/%Y") if isinstance(x, datetime) else "—"
     )
@@ -644,7 +645,7 @@ with tab_cz:
         unsafe_allow_html=True,
     )
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Jan 1 Price",  f"{cz_jan1:.2f}¢/bu")
+    m1.metric("Jan 1 Price",  f"${cz_jan1/100:.2f}/bu")
     m2.metric("US Production", f"{cz_prod:,.0f} Mil Bu")
     m3.metric("US Usage",      f"{cz_use:,.0f} Mil Bu")
     m4.metric("Prod/Use Ratio", f"{cz_ratio*100:.2f}%",
@@ -698,7 +699,7 @@ with tab_cn:
         unsafe_allow_html=True,
     )
     m1, m2 = st.columns(2)
-    m1.metric("Jan 1 Price",      f"{cn_jan1:.2f}¢/bu")
+    m1.metric("Jan 1 Price",      f"${cn_jan1/100:.2f}/bu")
     m2.metric("Carryout / Use",   f"{cn_co_pct*100:.2f}%")
 
     st.markdown("#### Historical Scatter: Carryout % vs Price as % of Jan 1")
@@ -744,7 +745,7 @@ with tab_sx:
         unsafe_allow_html=True,
     )
     m1, m2 = st.columns(2)
-    m1.metric("Jan 1 Price",      f"{sx_jan1:.2f}¢/bu")
+    m1.metric("Jan 1 Price",      f"${sx_jan1/100:.2f}/bu")
     m2.metric("World C/O / Use",  f"{sx_co_pct*100:.2f}%")
 
     st.markdown("#### Historical Scatter: World C/O % vs Price as % of Jan 1")
@@ -797,7 +798,7 @@ with tab_sn:
         unsafe_allow_html=True,
     )
     m1, m2, m3 = st.columns(3)
-    m1.metric("Jan 1 Price",     f"{sn_jan1:.2f}¢/bu")
+    m1.metric("Jan 1 Price",     f"${sn_jan1/100:.2f}/bu")
     m2.metric("World C/O / Use", f"{sn_co_pct*100:.2f}%")
     m3.metric("Current Category", sn_section)
 
