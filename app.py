@@ -415,7 +415,7 @@ def build_seasonal_df(contracts, prefix, delivery_year_filter=None):
     return pd.DataFrame(rows)
 
 
-def make_seasonal_overlay(seasonal_df, current_year, title):
+def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12):
     """
     Seasonal overlay chart: each historical year as a faint line,
     historical average ± 1 std dev band in green, current year in gold.
@@ -479,9 +479,15 @@ def make_seasonal_overlay(seasonal_df, current_year, title):
     fig.add_hline(y=100, line_dash="dot", line_color=DM_MUTED, line_width=1,
                   annotation_text=" Jan 1 = 100%", annotation_font=dict(color=DM_MUTED, size=10))
 
-    # Month tick marks (approx. first day of each month in a non-leap year)
-    month_doys  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
-    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    # Month tick marks — only show up to end_month
+    _all_doys  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
+    _all_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    month_doys  = [d for d, m in zip(_all_doys, range(1, 13)) if m <= end_month]
+    month_names = [n for n, m in zip(_all_names, range(1, 13)) if m <= end_month]
+
+    # X range: Jan 1 to last day of end_month (approx.)
+    _month_end_doy = [31,59,90,120,151,181,212,243,273,304,334,365]
+    x_max = _month_end_doy[end_month - 1] + 5   # small padding after last month
 
     fig.update_layout(
         title=dict(text=title, font=dict(color=DM_TEXT, size=12), x=0),
@@ -492,7 +498,7 @@ def make_seasonal_overlay(seasonal_df, current_year, title):
             title="Month",
             tickvals=month_doys, ticktext=month_names,
             gridcolor=DM_BORDER, color=DM_MUTED, zeroline=False,
-            range=[1, 366],
+            range=[1, x_max],
         ),
         yaxis=dict(
             title="% of Jan 1 Price",
@@ -1400,7 +1406,8 @@ with tab_seas:
 
             # Seasonal overlay chart
             st.plotly_chart(
-                make_seasonal_overlay(seas_df, cfg["current_year"], cfg["title"]),
+                make_seasonal_overlay(seas_df, cfg["current_year"], cfg["title"],
+                                      end_month=cfg["end_month"]),
                 use_container_width=True,
             )
 
