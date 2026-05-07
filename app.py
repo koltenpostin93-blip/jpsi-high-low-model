@@ -346,7 +346,7 @@ def build_display_table(df, ratio_col, ratio_label, current_ratio, current_jan1,
     out["% of Jan 1"]         = (d["price_pct"] * 100).round(1).astype(str) + "%"
     out["Indicated ($/bu)"]   = (d["indicated"] / 100).round(4)
     out["Date of H/L"]        = d["date"].apply(
-        lambda x: x.strftime("%m/%d/%Y") if isinstance(x, datetime) else "—"
+        lambda x: x.strftime("%m/%d/%Y") if (pd.notna(x) and isinstance(x, datetime)) else "—"
     )
     return out
 
