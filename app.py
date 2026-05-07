@@ -439,9 +439,12 @@ def make_seasonal_overlay(seasonal_df, current_year, title):
             hovertemplate=f"<b>{yr}</b><br>%{{x:.0f}} · %{{y:.1f}}% of Jan 1<extra></extra>",
         ))
 
-    # Average ± 1 SD band
-    avg = hist.groupby("doy")["price_pct"].mean()
-    std = hist.groupby("doy")["price_pct"].std().fillna(0)
+    # Average ± 1 SD band — smoothed with a 7-day rolling window to
+    # remove choppiness from uneven trading-day coverage across years
+    _avg_raw = hist.groupby("doy")["price_pct"].mean()
+    _std_raw = hist.groupby("doy")["price_pct"].std().fillna(0)
+    avg = _avg_raw.rolling(window=7, center=True, min_periods=1).mean()
+    std = _std_raw.rolling(window=7, center=True, min_periods=1).mean()
     doys = avg.index.tolist()
 
     fig.add_trace(go.Scatter(
