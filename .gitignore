@@ -1,7 +1,3 @@
-# Price history files — large, updated externally, not tracked in git
-data/Corn_Futures_History.xlsx
-data/Soybean_Futures_History.xlsx
-
 # Python
 __pycache__/
 *.pyc
