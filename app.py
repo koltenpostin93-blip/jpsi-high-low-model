@@ -763,6 +763,13 @@ with tab_cz:
         '<div class="sec-hdr">Dec Corn (CZ) — Production as % of Same Year\'s Use</div>',
         unsafe_allow_html=True,
     )
+
+    # Forecast tiles
+    t1, t2 = st.columns(2)
+    t1.markdown(headline_tile("CZ — Dec Corn", "Jan–Dec Indicated Low",  cz_hl_low,  cz_lp,  cz_t5_low,  "low"),  unsafe_allow_html=True)
+    t2.markdown(headline_tile("CZ — Dec Corn", "Jan–Dec Indicated High", cz_hl_high, cz_hp, cz_t5_high, "high"), unsafe_allow_html=True)
+    st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Jan 1 Price",  f"${cz_jan1/100:.2f}/bu")
     m2.metric("US Production", f"{cz_prod:,.0f} Mil Bu")
@@ -817,6 +824,13 @@ with tab_cn:
         '<div class="sec-hdr">Jul Corn (CN) — Carryout as % of Use</div>',
         unsafe_allow_html=True,
     )
+
+    # Forecast tiles
+    t1, t2 = st.columns(2)
+    t1.markdown(headline_tile("CN — Jul Corn", "Jan–Jul Indicated Low",  cn_hl_low,  cn_lp,  cn_t5_low,  "low"),  unsafe_allow_html=True)
+    t2.markdown(headline_tile("CN — Jul Corn", "Jan–Jul Indicated High", cn_hl_high, cn_hp, cn_t5_high, "high"), unsafe_allow_html=True)
+    st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+
     m1, m2 = st.columns(2)
     m1.metric("Jan 1 Price",      f"${cn_jan1/100:.2f}/bu")
     m2.metric("Carryout / Use",   f"{cn_co_pct*100:.2f}%")
@@ -863,6 +877,13 @@ with tab_sx:
         '<div class="sec-hdr">Nov Soybeans (SX) — World Carryout as % of Same Year\'s Use</div>',
         unsafe_allow_html=True,
     )
+
+    # Forecast tiles
+    t1, t2 = st.columns(2)
+    t1.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated Low",  sx_hl_low,  sx_lp,  sx_t5_low,  "low"),  unsafe_allow_html=True)
+    t2.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated High", sx_hl_high, sx_hp, sx_t5_high, "high"), unsafe_allow_html=True)
+    st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+
     m1, m2 = st.columns(2)
     m1.metric("Jan 1 Price",      f"${sx_jan1/100:.2f}/bu")
     m2.metric("World C/O / Use",  f"{sx_co_pct*100:.2f}%")
@@ -916,6 +937,13 @@ with tab_sn:
         f'(★ in tables below)</span></div>',
         unsafe_allow_html=True,
     )
+
+    # Forecast tiles
+    t1, t2 = st.columns(2)
+    t1.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated Low",  sn_hl_low,  sn_lp,  sn_t5_low,  "low"),  unsafe_allow_html=True)
+    t2.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated High", sn_hl_high, sn_hp, sn_t5_high, "high"), unsafe_allow_html=True)
+    st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+
     m1, m2, m3 = st.columns(3)
     m1.metric("Jan 1 Price",     f"${sn_jan1/100:.2f}/bu")
     m2.metric("World C/O / Use", f"{sn_co_pct*100:.2f}%")
