@@ -1345,6 +1345,25 @@ with tab_seas:
                 st.error(msg)
             st.rerun()
 
+    # ── Forecast tiles (always shown) ────────────────────────
+    st.markdown('<div class="hl-row-label">📉 Indicated Lows</div>', unsafe_allow_html=True)
+    t1, t2, t3, t4 = st.columns(4)
+    t1.markdown(headline_tile("CZ — Dec Corn",  "Jan–Dec Indicated Low",  cz_hl_low,  cz_lp,  cz_t5_low,  "low"),  unsafe_allow_html=True)
+    t2.markdown(headline_tile("CN — Jul Corn",  "Jan–Jul Indicated Low",  cn_hl_low,  cn_lp,  cn_t5_low,  "low"),  unsafe_allow_html=True)
+    t3.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated Low",  sx_hl_low,  sx_lp,  sx_t5_low,  "low"),  unsafe_allow_html=True)
+    t4.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated Low",  sn_hl_low,  sn_lp,  sn_t5_low,  "low"),  unsafe_allow_html=True)
+
+    st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="hl-row-label">📈 Indicated Highs</div>', unsafe_allow_html=True)
+    t1, t2, t3, t4 = st.columns(4)
+    t1.markdown(headline_tile("CZ — Dec Corn",  "Jan–Dec Indicated High", cz_hl_high, cz_hp, cz_t5_high, "high"), unsafe_allow_html=True)
+    t2.markdown(headline_tile("CN — Jul Corn",  "Jan–Jul Indicated High", cn_hl_high, cn_hp, cn_t5_high, "high"), unsafe_allow_html=True)
+    t3.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated High", sx_hl_high, sx_hp, sx_t5_high, "high"), unsafe_allow_html=True)
+    t4.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated High", sn_hl_high, sn_hp, sn_t5_high, "high"), unsafe_allow_html=True)
+
+    st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+
     if PH is None:
         st.error(
             f"Could not load price history files.\n\n"
