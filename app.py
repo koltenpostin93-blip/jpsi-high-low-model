@@ -319,19 +319,26 @@ def _load_sn(wb, name, is_low):
 def load_price_history():
     """
     Parse both wide-format futures price files.
-    Returns dict {"corn": {ticker: df}, "soy": {ticker: df}} or None if files missing.
-    Each df has a DatetimeIndex and columns: Open, High, Low, Close, OI, Volume.
-    Prices are in ¢/bu (raw file values).
+    Returns (data_dict, error_str).
+    data_dict = {"corn": {ticker: df}, "soy": {ticker: df}} on success, or None on failure.
+    error_str = None on success, diagnostic string on failure.
     """
-    if not CORN_PRICES_PATH.exists() or not SOY_PRICES_PATH.exists():
-        return None
+    corn_path = _CORN_PRIMARY if _CORN_PRIMARY.exists() else _CORN_LOCAL
+    soy_path  = _SOY_PRIMARY  if _SOY_PRIMARY.exists()  else _SOY_LOCAL
+
+    missing = []
+    if not corn_path.exists():
+        missing.append(f"Corn: {corn_path}")
+    if not soy_path.exists():
+        missing.append(f"Soy:  {soy_path}")
+    if missing:
+        return None, "Files not found:\n" + "\n".join(missing)
 
     def parse_file(path):
         contracts = {}
         xl = pd.ExcelFile(path, engine="openpyxl")
         for sheet in xl.sheet_names:
             raw = pd.read_excel(xl, sheet_name=sheet, header=None)
-            # Row 0 = ticker symbols, Row 1 = field headers, Row 2+ = data
             dates = pd.to_datetime(raw.iloc[2:, 0], errors="coerce")
             col = 1
             while col + 5 < len(raw.columns):
@@ -352,10 +359,10 @@ def load_price_history():
                 col += 7
         return contracts
 
-    return {
-        "corn": parse_file(CORN_PRICES_PATH),
-        "soy":  parse_file(SOY_PRICES_PATH),
-    }
+    try:
+        return {"corn": parse_file(corn_path), "soy": parse_file(soy_path)}, None
+    except Exception as e:
+        return None, f"Parse error: {e}"
 
 
 def _ticker_year(ticker):
@@ -794,7 +801,7 @@ with hdr_r:
 st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
 
 # ─── LOAD PRICE HISTORY ─────────────────────────────────────
-PH = load_price_history()   # None if files not on this machine
+PH, PH_ERR = load_price_history()
 
 # ─── TOP-LEVEL TABS ─────────────────────────────────────────
 tab_ov, tab_inp, tab_cz, tab_cn, tab_sx, tab_sn, tab_seas = st.tabs([
@@ -1305,17 +1312,20 @@ with tab_seas:
             with st.spinner("Copying latest files…"):
                 ok, msg = refresh_price_files()
             if ok:
-                st.success(msg)
+                st.toast(msg, icon="✅")
             else:
                 st.error(msg)
             st.rerun()
 
     if PH is None:
-        st.info(
-            "📂 Price history files not found at the configured paths. "
-            "This tab is available when running locally with access to the JSA network files. "
-            "Update `CORN_PRICES_PATH` / `SOY_PRICES_PATH` at the top of `app.py` if the files have moved.",
-            icon="ℹ️",
+        st.error(
+            f"Could not load price history files.\n\n"
+            f"**Reason:** {PH_ERR}\n\n"
+            f"Checked paths:\n"
+            f"- Primary (SharePoint): `{_CORN_PRIMARY}`  \n"
+            f"- Local fallback: `{_CORN_LOCAL}`  \n\n"
+            f"If the files exist at a different location, update `_CORN_PRIMARY` / `_SOY_PRIMARY` "
+            f"at the top of `app.py`.",
         )
     else:
         # Contract selector
