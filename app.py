@@ -486,7 +486,7 @@ sx_section   = st.session_state.get("sx_section", "Prod ≥ Prev Yr Use")
 sn_jan1      = st.session_state.get("sn_jan1",    1072.00)
 sn_co_raw    = st.session_state.get("sn_co",         29.5)
 sn_section   = st.session_state.get("sn_section", "No Crop Scare")
-use_weighted = st.session_state.get("use_weighted", False)
+use_weighted = st.session_state.get("method_radio", "Simple Median") == "Weighted Median"
 
 cz_ratio  = cz_prod / cz_use if cz_use else 0.0
 cn_co_pct = cn_co_raw / 100
@@ -727,8 +727,6 @@ with tab_inp:
             "drive the indicated price more than distant ones."
         ),
     )
-    # Write the boolean back into session_state so it's picked up on next rerun
-    st.session_state["use_weighted"] = (method_choice == "Weighted Median")
     st.markdown(
         f'<div style="color:{DM_MUTED};font-size:0.78rem;margin:6px 0 22px;">'
         f'Currently active: <b style="color:{COL_GOLD};">{METHOD_LABEL}</b> — '
