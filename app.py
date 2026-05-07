@@ -130,6 +130,34 @@ CORN_PRICES_PATH = _CORN_PRIMARY if _CORN_PRIMARY.exists() else _CORN_LOCAL
 SOY_PRICES_PATH  = _SOY_PRIMARY  if _SOY_PRIMARY.exists()  else _SOY_LOCAL
 
 
+def refresh_price_files():
+    """
+    Copy the latest price files from the SharePoint-synced path into data/.
+    Returns (success: bool, message: str).
+    """
+    import shutil
+    messages = []
+    success = True
+    for src, dst, label in [
+        (_CORN_PRIMARY, _CORN_LOCAL, "Corn"),
+        (_SOY_PRIMARY,  _SOY_LOCAL,  "Soybeans"),
+    ]:
+        if src.exists():
+            try:
+                shutil.copy2(src, dst)
+                messages.append(f"✅ {label}: copied from SharePoint sync folder")
+            except Exception as e:
+                messages.append(f"❌ {label}: copy failed — {e}")
+                success = False
+        elif dst.exists():
+            messages.append(f"⚠️ {label}: SharePoint path not reachable, keeping existing data/ file")
+        else:
+            messages.append(f"❌ {label}: no file found at either path")
+            success = False
+    load_price_history.clear()   # bust the cache so next call re-parses
+    return success, "\n\n".join(messages)
+
+
 def _parse_year(v):
     if v is None:
         return None
@@ -1266,8 +1294,21 @@ with tab_sn:
 # SEASONALS TAB
 # ══════════════════════════════════════════════════════════════
 with tab_seas:
-    st.markdown('<div class="sec-hdr">📈 Seasonal Price Patterns — % of Jan 1</div>',
-                unsafe_allow_html=True)
+    hd_col, btn_col = st.columns([5, 1])
+    with hd_col:
+        st.markdown('<div class="sec-hdr">📈 Seasonal Price Patterns — % of Jan 1</div>',
+                    unsafe_allow_html=True)
+    with btn_col:
+        st.markdown('<div style="height:20px;"></div>', unsafe_allow_html=True)
+        if st.button("🔄 Refresh Data", key="refresh_price_btn", use_container_width=True,
+                     help="Pulls the latest files from the SharePoint-synced folder and reloads the charts."):
+            with st.spinner("Copying latest files…"):
+                ok, msg = refresh_price_files()
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
+            st.rerun()
 
     if PH is None:
         st.info(
