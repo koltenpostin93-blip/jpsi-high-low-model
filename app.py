@@ -118,6 +118,11 @@ div[data-testid="stDataFrame"]{{
 # ─── DATA LOADING ───────────────────────────────────────────
 DATA_PATH = Path(__file__).parent / "data" / "High Low Model.xlsx"
 
+# External price history files — update these paths as the files move/update.
+# App degrades gracefully on Streamlit Cloud where these paths don't exist.
+CORN_PRICES_PATH = Path(r"C:\Users\KoltenPostin\John Stewart and Associates\JSA - Documents\Research Analyst\Reports\Projects\Python Codes\Prices & Spreads\Corn_Futures_History.xlsx")
+SOY_PRICES_PATH  = Path(r"C:\Users\KoltenPostin\John Stewart and Associates\JSA - Documents\Research Analyst\Reports\Projects\Python Codes\Prices & Spreads\Soybean_Futures_History.xlsx")
+
 
 def _parse_year(v):
     if v is None:
@@ -272,6 +277,190 @@ def _load_sn(wb, name, is_low):
             section=section,
         ))
     return pd.DataFrame(out)
+
+
+# ─── PRICE HISTORY LOADER ───────────────────────────────────
+
+@st.cache_data
+def load_price_history():
+    """
+    Parse both wide-format futures price files.
+    Returns dict {"corn": {ticker: df}, "soy": {ticker: df}} or None if files missing.
+    Each df has a DatetimeIndex and columns: Open, High, Low, Close, OI, Volume.
+    Prices are in ¢/bu (raw file values).
+    """
+    if not CORN_PRICES_PATH.exists() or not SOY_PRICES_PATH.exists():
+        return None
+
+    def parse_file(path):
+        contracts = {}
+        xl = pd.ExcelFile(path, engine="openpyxl")
+        for sheet in xl.sheet_names:
+            raw = pd.read_excel(xl, sheet_name=sheet, header=None)
+            # Row 0 = ticker symbols, Row 1 = field headers, Row 2+ = data
+            dates = pd.to_datetime(raw.iloc[2:, 0], errors="coerce")
+            col = 1
+            while col + 5 < len(raw.columns):
+                ticker = raw.iloc[0, col]
+                if pd.isna(ticker) or str(ticker).strip() == "":
+                    col += 7
+                    continue
+                ticker = str(ticker).strip()
+                block = raw.iloc[2:, col:col + 6].copy()
+                block.columns = ["Open", "High", "Low", "Close", "OI", "Volume"]
+                block.index = dates.values
+                block = block[pd.notna(block.index)]
+                for c in block.columns:
+                    block[c] = pd.to_numeric(block[c], errors="coerce")
+                block = block.dropna(subset=["Close"])
+                if not block.empty:
+                    contracts[ticker] = block
+                col += 7
+        return contracts
+
+    return {
+        "corn": parse_file(CORN_PRICES_PATH),
+        "soy":  parse_file(SOY_PRICES_PATH),
+    }
+
+
+def _ticker_year(ticker):
+    """Extract 4-digit delivery year from a ticker like ZCZ25 → 2025."""
+    suffix = ticker[-2:]
+    try:
+        y2 = int(suffix)
+        return 2000 + y2 if y2 < 60 else 1900 + y2
+    except ValueError:
+        return None
+
+
+def build_seasonal_df(contracts, prefix, delivery_year_filter=None):
+    """
+    For contracts whose ticker starts with `prefix` (e.g. 'ZCZ'),
+    filter each contract's data to just dates in its delivery year,
+    normalize Close to % of the first trading day of that year,
+    and return a long DataFrame with columns:
+        year, date, doy (day of year 1-366), close_raw, price_pct
+    Optionally restrict to delivery years in `delivery_year_filter` (list of ints).
+    """
+    rows = []
+    for ticker, df in contracts.items():
+        if not ticker.startswith(prefix):
+            continue
+        year = _ticker_year(ticker)
+        if year is None:
+            continue
+        if delivery_year_filter and year not in delivery_year_filter:
+            continue
+
+        idx = pd.DatetimeIndex(df.index)
+        year_df = df[idx.year == year].copy()
+        if len(year_df) < 10:
+            continue
+
+        jan1_price = year_df.iloc[0]["Close"]
+        if pd.isna(jan1_price) or jan1_price <= 0:
+            continue
+
+        for ts, row in year_df.iterrows():
+            dt = pd.Timestamp(ts)
+            rows.append({
+                "year":      year,
+                "date":      dt,
+                "doy":       dt.timetuple().tm_yday,
+                "close_raw": row["Close"],
+                "price_pct": row["Close"] / jan1_price * 100,
+            })
+    return pd.DataFrame(rows)
+
+
+def make_seasonal_overlay(seasonal_df, current_year, title):
+    """
+    Seasonal overlay chart: each historical year as a faint line,
+    historical average ± 1 std dev band in green, current year in gold.
+    X-axis = day of year labelled by month. Y-axis = % of Jan 1.
+    """
+    fig = go.Figure()
+
+    hist = seasonal_df[seasonal_df["year"] != current_year]
+    curr = seasonal_df[seasonal_df["year"] == current_year]
+
+    # Faint historical year lines
+    years = sorted(hist["year"].unique())
+    for yr in years:
+        g = hist[hist["year"] == yr].sort_values("doy")
+        fig.add_trace(go.Scatter(
+            x=g["doy"], y=g["price_pct"],
+            mode="lines",
+            line=dict(width=0.7, color="rgba(94,113,100,0.25)"),
+            name=str(yr),
+            showlegend=False,
+            hovertemplate=f"<b>{yr}</b><br>%{{x:.0f}} · %{{y:.1f}}% of Jan 1<extra></extra>",
+        ))
+
+    # Average ± 1 SD band
+    avg = hist.groupby("doy")["price_pct"].mean()
+    std = hist.groupby("doy")["price_pct"].std().fillna(0)
+    doys = avg.index.tolist()
+
+    fig.add_trace(go.Scatter(
+        x=doys + doys[::-1],
+        y=list(avg + std) + list((avg - std).iloc[::-1]),
+        fill="toself",
+        fillcolor="rgba(94,113,100,0.18)",
+        line=dict(width=0),
+        name="±1 Std Dev",
+        hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=doys, y=avg.values,
+        mode="lines",
+        line=dict(width=2, color=JSA_LT),
+        name="Historical Avg",
+        hovertemplate="Avg: %{y:.1f}% of Jan 1<extra></extra>",
+    ))
+
+    # Current year
+    if not curr.empty:
+        curr = curr.sort_values("doy")
+        fig.add_trace(go.Scatter(
+            x=curr["doy"], y=curr["price_pct"],
+            mode="lines",
+            line=dict(width=2.5, color=COL_GOLD),
+            name=f"{current_year} (Current)",
+            hovertemplate=f"<b>{current_year}</b><br>%{{x:.0f}} · %{{y:.1f}}% of Jan 1<extra></extra>",
+        ))
+
+    # Jan 1 baseline
+    fig.add_hline(y=100, line_dash="dot", line_color=DM_MUTED, line_width=1,
+                  annotation_text=" Jan 1 = 100%", annotation_font=dict(color=DM_MUTED, size=10))
+
+    # Month tick marks (approx. first day of each month in a non-leap year)
+    month_doys  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
+    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
+    fig.update_layout(
+        title=dict(text=title, font=dict(color=DM_TEXT, size=12), x=0),
+        plot_bgcolor=DM_SURFACE2,
+        paper_bgcolor=DM_SURFACE2,
+        font=dict(color=DM_TEXT, family="Arial"),
+        xaxis=dict(
+            title="Month",
+            tickvals=month_doys, ticktext=month_names,
+            gridcolor=DM_BORDER, color=DM_MUTED, zeroline=False,
+            range=[1, 366],
+        ),
+        yaxis=dict(
+            title="% of Jan 1 Price",
+            gridcolor=DM_BORDER, color=DM_MUTED,
+            zeroline=False, ticksuffix="%",
+        ),
+        legend=dict(bgcolor=DM_SURFACE, bordercolor=DM_BORDER, borderwidth=1,
+                    font=dict(color=DM_TEXT, size=10)),
+        height=480,
+        margin=dict(l=55, r=20, t=45, b=50),
+    )
+    return fig
 
 
 # ─── COMPUTATION HELPERS ────────────────────────────────────
@@ -570,14 +759,18 @@ with hdr_r:
 
 st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
 
+# ─── LOAD PRICE HISTORY ─────────────────────────────────────
+PH = load_price_history()   # None if files not on this machine
+
 # ─── TOP-LEVEL TABS ─────────────────────────────────────────
-tab_ov, tab_inp, tab_cz, tab_cn, tab_sx, tab_sn = st.tabs([
+tab_ov, tab_inp, tab_cz, tab_cn, tab_sx, tab_sn, tab_seas = st.tabs([
     "📌  Overview",
     "⚙️  Assumptions",
     "🌽  Dec Corn (CZ)",
     "🌽  Jul Corn (CN)",
     "🫘  Nov Soybeans (SX)",
     "🫘  Jul Soybeans (SN)",
+    "📈  Seasonals",
 ])
 
 
@@ -1061,3 +1254,110 @@ with tab_sn:
             unsafe_allow_html=True,
         )
         st.dataframe(tbl, use_container_width=True, hide_index=True, height=480)
+
+
+# ══════════════════════════════════════════════════════════════
+# SEASONALS TAB
+# ══════════════════════════════════════════════════════════════
+with tab_seas:
+    st.markdown('<div class="sec-hdr">📈 Seasonal Price Patterns — % of Jan 1</div>',
+                unsafe_allow_html=True)
+
+    if PH is None:
+        st.info(
+            "📂 Price history files not found at the configured paths. "
+            "This tab is available when running locally with access to the JSA network files. "
+            "Update `CORN_PRICES_PATH` / `SOY_PRICES_PATH` at the top of `app.py` if the files have moved.",
+            icon="ℹ️",
+        )
+    else:
+        # Contract selector
+        seas_contract = st.radio(
+            "Contract",
+            options=["🌽 Dec Corn (CZ25)", "🌽 Jul Corn (CN26)",
+                     "🫘 Nov Soybeans (SX25)", "🫘 Jul Soybeans (SN26)"],
+            horizontal=True,
+            key="seas_contract",
+        )
+
+        st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+        # ── Config per contract ───────────────────────────────
+        SEAS_CONFIG = {
+            "🌽 Dec Corn (CZ25)": dict(
+                contracts=PH["corn"], prefix="ZCZ",
+                current_year=2025,
+                title="Dec Corn (CZ) — Annual Price as % of Jan 1  |  Each line = one delivery year",
+                end_month=12,
+            ),
+            "🌽 Jul Corn (CN26)": dict(
+                contracts=PH["corn"], prefix="ZCN",
+                current_year=2026,
+                title="Jul Corn (CN) — Annual Price as % of Jan 1  |  Each line = one delivery year",
+                end_month=7,
+            ),
+            "🫘 Nov Soybeans (SX25)": dict(
+                contracts=PH["soy"], prefix="ZSX",
+                current_year=2025,
+                title="Nov Soybeans (SX) — Annual Price as % of Jan 1  |  Each line = one delivery year",
+                end_month=11,
+            ),
+            "🫘 Jul Soybeans (SN26)": dict(
+                contracts=PH["soy"], prefix="ZSN",
+                current_year=2026,
+                title="Jul Soybeans (SN) — Annual Price as % of Jan 1  |  Each line = one delivery year",
+                end_month=7,
+            ),
+        }
+
+        cfg = SEAS_CONFIG[seas_contract]
+        seas_df = build_seasonal_df(cfg["contracts"], cfg["prefix"])
+
+        if seas_df.empty:
+            st.warning("No price data found for this contract.")
+        else:
+            # Clip to marketing year window (Jan 1 → end month)
+            seas_df = seas_df[seas_df["date"].dt.month <= cfg["end_month"]]
+
+            # Summary metrics
+            hist_df  = seas_df[seas_df["year"] != cfg["current_year"]]
+            curr_df  = seas_df[seas_df["year"] == cfg["current_year"]]
+            n_years  = hist_df["year"].nunique()
+            avg_high = hist_df.groupby("year")["price_pct"].max().mean()
+            avg_low  = hist_df.groupby("year")["price_pct"].min().mean()
+            curr_last = curr_df["price_pct"].iloc[-1] if not curr_df.empty else None
+
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("Historical Years",    f"{n_years}")
+            mc2.metric("Avg Seasonal High",   f"{avg_high:.1f}% of Jan 1")
+            mc3.metric("Avg Seasonal Low",    f"{avg_low:.1f}% of Jan 1")
+            if curr_last is not None:
+                mc4.metric("Current Yr (Latest)", f"{curr_last:.1f}% of Jan 1")
+            else:
+                mc4.metric("Current Yr (Latest)", "No data yet")
+
+            st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+            # Seasonal overlay chart
+            st.plotly_chart(
+                make_seasonal_overlay(seas_df, cfg["current_year"], cfg["title"]),
+                use_container_width=True,
+            )
+
+            # Year-by-year summary table
+            with st.expander("📋 Year-by-Year Summary Table", expanded=False):
+                summary_rows = []
+                for yr, g in seas_df.groupby("year"):
+                    jan1_raw = g[g["doy"] == g["doy"].min()]["close_raw"].iloc[0]
+                    summary_rows.append({
+                        "Year":          int(yr),
+                        "Jan 1 ($/bu)":  f"${jan1_raw/100:.2f}",
+                        "Seasonal High": f"{g['price_pct'].max():.1f}%",
+                        "Seasonal Low":  f"{g['price_pct'].min():.1f}%",
+                        "Range":         f"{g['price_pct'].max() - g['price_pct'].min():.1f}%",
+                        "Current Yr":    "★" if yr == cfg["current_year"] else "",
+                    })
+                st.dataframe(
+                    pd.DataFrame(summary_rows).sort_values("Year", ascending=False),
+                    use_container_width=True, hide_index=True,
+                )
