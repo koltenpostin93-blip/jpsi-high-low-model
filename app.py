@@ -416,119 +416,170 @@ def build_seasonal_df(contracts, prefix, delivery_year_filter=None):
 
 
 def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
-                          ind_high_pct=None, ind_low_pct=None):
+                          ind_high_pct=None, ind_low_pct=None, jan1_price=None):
     """
-    Seasonal overlay chart: each historical year as a faint line,
-    historical average ± 1 std dev band in green, current year in gold.
-    X-axis = day of year labelled by month. Y-axis = % of Jan 1.
+    MRCI-style seasonal chart:
+    - Faint grey lines for every historical year
+    - Full-history smoothed avg (green) + ±1 SD band
+    - 5-year smoothed avg (coral dashed)
+    - Current year as thick gold line
+    - Dual y-axis: left = % of Jan 1, right = $/bu (if jan1_price provided)
+    - Vertical highlight band at today's date
+    - Dashed H/L reference lines
     """
     fig = go.Figure()
 
     hist = seasonal_df[seasonal_df["year"] != current_year]
     curr = seasonal_df[seasonal_df["year"] == current_year]
 
-    # Faint historical year lines
-    years = sorted(hist["year"].unique())
-    for yr in years:
-        g = hist[hist["year"] == yr].sort_values("doy")
+    # ── Faint historical year lines ──────────────────────────
+    for yr, g in hist.groupby("year"):
+        g = g.sort_values("doy")
         fig.add_trace(go.Scatter(
             x=g["doy"], y=g["price_pct"],
             mode="lines",
-            line=dict(width=0.7, color="rgba(94,113,100,0.25)"),
-            name=str(yr),
-            showlegend=False,
-            hovertemplate=f"<b>{yr}</b><br>%{{x:.0f}} · %{{y:.1f}}% of Jan 1<extra></extra>",
+            line=dict(width=0.6, color="rgba(120,140,130,0.18)"),
+            name=str(yr), showlegend=False,
+            hovertemplate=f"<b>{yr}</b>  %{{y:.1f}}% of Jan 1<extra></extra>",
         ))
 
-    # Average ± 1 SD band — smoothed with a 7-day rolling window to
-    # remove choppiness from uneven trading-day coverage across years
-    _avg_raw = hist.groupby("doy")["price_pct"].mean()
-    _std_raw = hist.groupby("doy")["price_pct"].std().fillna(0)
-    avg = _avg_raw.rolling(window=7, center=True, min_periods=1).mean()
-    std = _std_raw.rolling(window=7, center=True, min_periods=1).mean()
-    doys = avg.index.tolist()
+    # ── Helper: smoothed group average ───────────────────────
+    def _smooth_avg(df):
+        raw = df.groupby("doy")["price_pct"].mean()
+        return raw.rolling(window=7, center=True, min_periods=1).mean()
+
+    def _smooth_std(df):
+        raw = df.groupby("doy")["price_pct"].std().fillna(0)
+        return raw.rolling(window=7, center=True, min_periods=1).mean()
+
+    # ── Full-history avg ± 1 SD band ─────────────────────────
+    avg_full = _smooth_avg(hist)
+    std_full = _smooth_std(hist)
+    doys = avg_full.index.tolist()
+    n_full = hist["year"].nunique()
 
     fig.add_trace(go.Scatter(
         x=doys + doys[::-1],
-        y=list(avg + std) + list((avg - std).iloc[::-1]),
-        fill="toself",
-        fillcolor="rgba(94,113,100,0.18)",
-        line=dict(width=0),
-        name="±1 Std Dev",
-        hoverinfo="skip",
+        y=list(avg_full + std_full) + list((avg_full - std_full).iloc[::-1]),
+        fill="toself", fillcolor="rgba(94,113,100,0.15)",
+        line=dict(width=0), name="±1 SD (Full)", hoverinfo="skip",
     ))
     fig.add_trace(go.Scatter(
-        x=doys, y=avg.values,
-        mode="lines",
+        x=doys, y=avg_full.values, mode="lines",
         line=dict(width=2, color=JSA_LT),
-        name="Historical Avg",
-        hovertemplate="Avg: %{y:.1f}% of Jan 1<extra></extra>",
+        name=f"Full Avg ({n_full} yr)",
+        hovertemplate="Full avg: %{y:.1f}%<extra></extra>",
     ))
 
-    # Current year
+    # ── 5-year avg ───────────────────────────────────────────
+    hist5 = hist[hist["year"] >= current_year - 5]
+    if hist5["year"].nunique() >= 3:
+        avg5 = _smooth_avg(hist5)
+        fig.add_trace(go.Scatter(
+            x=avg5.index.tolist(), y=avg5.values, mode="lines",
+            line=dict(width=1.8, color=COL_RED, dash="dash"),
+            name="5-Yr Avg",
+            hovertemplate="5-yr avg: %{y:.1f}%<extra></extra>",
+        ))
+
+    # ── 15-year avg ──────────────────────────────────────────
+    hist15 = hist[hist["year"] >= current_year - 15]
+    if hist15["year"].nunique() >= 5:
+        avg15 = _smooth_avg(hist15)
+        fig.add_trace(go.Scatter(
+            x=avg15.index.tolist(), y=avg15.values, mode="lines",
+            line=dict(width=1.8, color=COL_LOW, dash="dot"),
+            name="15-Yr Avg",
+            hovertemplate="15-yr avg: %{y:.1f}%<extra></extra>",
+        ))
+
+    # ── Current year (thick gold) ─────────────────────────────
     if not curr.empty:
         curr = curr.sort_values("doy")
         fig.add_trace(go.Scatter(
-            x=curr["doy"], y=curr["price_pct"],
-            mode="lines",
-            line=dict(width=2.5, color=COL_GOLD),
-            name=f"{current_year} (Current)",
-            hovertemplate=f"<b>{current_year}</b><br>%{{x:.0f}} · %{{y:.1f}}% of Jan 1<extra></extra>",
+            x=curr["doy"], y=curr["price_pct"], mode="lines",
+            line=dict(width=2.8, color=COL_GOLD),
+            name=f"{current_year}  (Current)",
+            hovertemplate=f"<b>{current_year}</b>  %{{y:.1f}}% of Jan 1<extra></extra>",
         ))
 
-    # Jan 1 baseline
-    fig.add_hline(y=100, line_dash="dot", line_color=DM_MUTED, line_width=1,
-                  annotation_text=" Jan 1 = 100%", annotation_font=dict(color=DM_MUTED, size=10))
+    # ── Today vertical band ───────────────────────────────────
+    today_doy = datetime.now().timetuple().tm_yday
+    fig.add_vrect(
+        x0=today_doy - 2, x1=today_doy + 2,
+        fillcolor="rgba(100,180,200,0.18)", line_width=0,
+        annotation_text="Today", annotation_position="top",
+        annotation_font=dict(color=DM_MUTED, size=9),
+    )
 
-    # Indicated high / low reference lines
+    # ── Jan 1 baseline ────────────────────────────────────────
+    fig.add_hline(y=100, line_dash="dot", line_color=DM_MUTED, line_width=1,
+                  annotation_text=" Jan 1", annotation_font=dict(color=DM_MUTED, size=9))
+
+    # ── Indicated H/L lines ───────────────────────────────────
     if ind_high_pct is not None:
         fig.add_hline(
-            y=ind_high_pct,
-            line_dash="dash", line_color=COL_HIGH, line_width=1.5,
-            annotation_text=f" Indicated High {ind_high_pct:.1f}%",
+            y=ind_high_pct, line_dash="dash", line_color=COL_HIGH, line_width=1.5,
+            annotation_text=f" Ind. High {ind_high_pct:.1f}%",
             annotation_position="right",
             annotation_font=dict(color=COL_HIGH, size=10),
         )
     if ind_low_pct is not None:
         fig.add_hline(
-            y=ind_low_pct,
-            line_dash="dash", line_color=COL_LOW, line_width=1.5,
-            annotation_text=f" Indicated Low {ind_low_pct:.1f}%",
+            y=ind_low_pct, line_dash="dash", line_color=COL_LOW, line_width=1.5,
+            annotation_text=f" Ind. Low {ind_low_pct:.1f}%",
             annotation_position="right",
             annotation_font=dict(color=COL_LOW, size=10),
         )
 
-    # Month tick marks — only show up to end_month
+    # ── Axis config ───────────────────────────────────────────
     _all_doys  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
     _all_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     month_doys  = [d for d, m in zip(_all_doys, range(1, 13)) if m <= end_month]
     month_names = [n for n, m in zip(_all_names, range(1, 13)) if m <= end_month]
-
-    # X range: Jan 1 to last day of end_month (approx.)
     _month_end_doy = [31,59,90,120,151,181,212,243,273,304,334,365]
-    x_max = _month_end_doy[end_month - 1] + 5   # small padding after last month
+    x_max = _month_end_doy[end_month - 1] + 5
 
-    fig.update_layout(
+    # Right axis: actual $/bu ticks derived from % × Jan 1 price
+    if jan1_price:
+        all_pcts = seasonal_df["price_pct"].dropna()
+        y_lo = max(50, int(all_pcts.min() * 100) - 5)
+        y_hi = min(200, int(all_pcts.max() * 100) + 5)
+        pct_ticks = list(range(y_lo, y_hi + 1, 5))
+        dollar_labels = [f"${p/100 * jan1_price/100:.2f}" for p in pct_ticks]
+        yaxis2 = dict(
+            title="Price ($/bu)", overlaying="y", side="right",
+            tickvals=pct_ticks, ticktext=dollar_labels,
+            gridcolor="rgba(0,0,0,0)", color=DM_MUTED, zeroline=False,
+            range=[y_lo, y_hi],
+        )
+        yaxis_range = [y_lo, y_hi]
+    else:
+        yaxis2 = None
+        yaxis_range = None
+
+    layout = dict(
         title=dict(text=title, font=dict(color=DM_TEXT, size=12), x=0),
-        plot_bgcolor=DM_SURFACE2,
-        paper_bgcolor=DM_SURFACE2,
+        plot_bgcolor=DM_SURFACE2, paper_bgcolor=DM_SURFACE2,
         font=dict(color=DM_TEXT, family="Arial"),
         xaxis=dict(
-            title="Month",
-            tickvals=month_doys, ticktext=month_names,
+            title="Month", tickvals=month_doys, ticktext=month_names,
             gridcolor=DM_BORDER, color=DM_MUTED, zeroline=False,
             range=[1, x_max],
         ),
         yaxis=dict(
-            title="% of Jan 1 Price",
-            gridcolor=DM_BORDER, color=DM_MUTED,
-            zeroline=False, ticksuffix="%",
+            title="% of Jan 1", gridcolor=DM_BORDER, color=DM_MUTED,
+            zeroline=False, ticksuffix="%", range=yaxis_range,
         ),
         legend=dict(bgcolor=DM_SURFACE, bordercolor=DM_BORDER, borderwidth=1,
                     font=dict(color=DM_TEXT, size=10)),
-        height=480,
-        margin=dict(l=55, r=20, t=45, b=50),
+        height=500,
+        margin=dict(l=60, r=80, t=45, b=50),
     )
+    if yaxis2:
+        layout["yaxis2"] = yaxis2
+
+    fig.update_layout(**layout)
     return fig
 
 
@@ -1392,32 +1443,32 @@ with tab_seas:
             "🌽 Dec Corn (CZ26)": dict(
                 contracts=PH["corn"], prefix="ZCZ",
                 current_year=2026,
-                title="Dec Corn (CZ) — Annual Price as % of Jan 1  |  Each line = one delivery year",
-                end_month=12,
+                title="Dec Corn (CZ26) — Seasonal Price Pattern  |  Each line = one delivery year",
+                end_month=12, jan1_price=cz_jan1,
                 ind_high_pct=cz_hl_high / cz_jan1 * 100 if cz_hl_high and cz_jan1 else None,
                 ind_low_pct =cz_hl_low  / cz_jan1 * 100 if cz_hl_low  and cz_jan1 else None,
             ),
             "🌽 Jul Corn (CN26)": dict(
                 contracts=PH["corn"], prefix="ZCN",
                 current_year=2026,
-                title="Jul Corn (CN) — Annual Price as % of Jan 1  |  Each line = one delivery year",
-                end_month=7,
+                title="Jul Corn (CN26) — Seasonal Price Pattern  |  Each line = one delivery year",
+                end_month=7, jan1_price=cn_jan1,
                 ind_high_pct=cn_hl_high / cn_jan1 * 100 if cn_hl_high and cn_jan1 else None,
                 ind_low_pct =cn_hl_low  / cn_jan1 * 100 if cn_hl_low  and cn_jan1 else None,
             ),
             "🫘 Nov Soybeans (SX26)": dict(
                 contracts=PH["soy"], prefix="ZSX",
                 current_year=2026,
-                title="Nov Soybeans (SX) — Annual Price as % of Jan 1  |  Each line = one delivery year",
-                end_month=11,
+                title="Nov Soybeans (SX26) — Seasonal Price Pattern  |  Each line = one delivery year",
+                end_month=11, jan1_price=sx_jan1,
                 ind_high_pct=sx_hl_high / sx_jan1 * 100 if sx_hl_high and sx_jan1 else None,
                 ind_low_pct =sx_hl_low  / sx_jan1 * 100 if sx_hl_low  and sx_jan1 else None,
             ),
             "🫘 Jul Soybeans (SN26)": dict(
                 contracts=PH["soy"], prefix="ZSN",
                 current_year=2026,
-                title="Jul Soybeans (SN) — Annual Price as % of Jan 1  |  Each line = one delivery year",
-                end_month=7,
+                title="Jul Soybeans (SN26) — Seasonal Price Pattern  |  Each line = one delivery year",
+                end_month=7, jan1_price=sn_jan1,
                 ind_high_pct=sn_hl_high / sn_jan1 * 100 if sn_hl_high and sn_jan1 else None,
                 ind_low_pct =sn_hl_low  / sn_jan1 * 100 if sn_hl_low  and sn_jan1 else None,
             ),
@@ -1458,6 +1509,7 @@ with tab_seas:
                     end_month=cfg["end_month"],
                     ind_high_pct=cfg.get("ind_high_pct"),
                     ind_low_pct=cfg.get("ind_low_pct"),
+                    jan1_price=cfg.get("jan1_price"),
                 ),
                 use_container_width=True,
             )
