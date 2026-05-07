@@ -933,7 +933,7 @@ with tab_inp:
     with col_a:
         st.markdown(
             f'<div class="input-card">'
-            f'<div class="input-card-title">🌽 Dec Corn (CZ25)</div>'
+            f'<div class="input-card-title">🌽 Dec Corn (CZ26)</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -986,7 +986,7 @@ with tab_inp:
     with col_c:
         st.markdown(
             f'<div class="input-card">'
-            f'<div class="input-card-title">🫘 Nov Soybeans (SX25)</div>'
+            f'<div class="input-card-title">🫘 Nov Soybeans (SX26)</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1340,8 +1340,8 @@ with tab_seas:
         # Contract selector
         seas_contract = st.radio(
             "Contract",
-            options=["🌽 Dec Corn (CZ25)", "🌽 Jul Corn (CN26)",
-                     "🫘 Nov Soybeans (SX25)", "🫘 Jul Soybeans (SN26)"],
+            options=["🌽 Dec Corn (CZ26)", "🌽 Jul Corn (CN26)",
+                     "🫘 Nov Soybeans (SX26)", "🫘 Jul Soybeans (SN26)"],
             horizontal=True,
             key="seas_contract",
         )
@@ -1350,9 +1350,9 @@ with tab_seas:
 
         # ── Config per contract ───────────────────────────────
         SEAS_CONFIG = {
-            "🌽 Dec Corn (CZ25)": dict(
+            "🌽 Dec Corn (CZ26)": dict(
                 contracts=PH["corn"], prefix="ZCZ",
-                current_year=2025,
+                current_year=2026,
                 title="Dec Corn (CZ) — Annual Price as % of Jan 1  |  Each line = one delivery year",
                 end_month=12,
             ),
@@ -1362,9 +1362,9 @@ with tab_seas:
                 title="Jul Corn (CN) — Annual Price as % of Jan 1  |  Each line = one delivery year",
                 end_month=7,
             ),
-            "🫘 Nov Soybeans (SX25)": dict(
+            "🫘 Nov Soybeans (SX26)": dict(
                 contracts=PH["soy"], prefix="ZSX",
-                current_year=2025,
+                current_year=2026,
                 title="Nov Soybeans (SX) — Annual Price as % of Jan 1  |  Each line = one delivery year",
                 end_month=11,
             ),
