@@ -16,7 +16,7 @@ st.set_page_config(
     page_title="JPSI High/Low Futures Model",
     page_icon="🌽",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ─── COLORS ─────────────────────────────────────────────────
@@ -38,8 +38,7 @@ COL_RED     = "#e07070"
 st.markdown(f"""
 <style>
 html,body,[data-testid="stAppViewContainer"]{{background:{DM_BG};color:{DM_TEXT};}}
-[data-testid="stSidebar"]{{background:{DM_SURFACE};border-right:1px solid {DM_BORDER};}}
-[data-testid="stSidebar"] *{{color:{DM_TEXT} !important;}}
+[data-testid="stSidebar"]{{display:none;}}
 #MainMenu,footer,header{{visibility:hidden;}}
 .stDeployButton{{display:none;}}
 
@@ -83,6 +82,17 @@ html,body,[data-testid="stAppViewContainer"]{{background:{DM_BG};color:{DM_TEXT}
 .indicated-box{{
   background:{DM_SURFACE2};border:1px solid {DM_BORDER};border-radius:8px;
   padding:10px 14px;margin-bottom:10px;font-size:0.88rem;
+}}
+
+/* Input tab card styling */
+.input-card{{
+  background:{DM_SURFACE};border:1px solid {DM_BORDER};border-radius:12px;
+  padding:20px 22px 18px;margin-bottom:4px;
+}}
+.input-card-title{{
+  font-size:1.0rem;font-weight:700;color:{DM_TEXT};
+  margin-bottom:14px;padding-bottom:10px;
+  border-bottom:1px solid {DM_BORDER};
 }}
 
 .stTabs [data-baseweb="tab-list"]{{
@@ -138,9 +148,6 @@ def load_data():
 
 
 def _load_cz(wb, name):
-    """CZ Low/High: col mapping (0-indexed tuple)
-       [1]=Year [2]=Usage [4]=Prod [8]=Jan1 [10]=Date [12]=Price [13]=Est flag
-    """
     rows = list(wb[name].iter_rows(values_only=True))
     out = []
     for row in rows:
@@ -170,10 +177,6 @@ def _load_cz(wb, name):
 
 
 def _load_cn(wb, name):
-    """CN Low/High: col mapping
-       [1]=Year [4]=C/O% [5]=Price [6]=Est [7]=Date [9]=Jan1
-       Stop before crop-scare sub-section (row 49, i=48).
-    """
     rows = list(wb[name].iter_rows(values_only=True))
     out = []
     for i, row in enumerate(rows):
@@ -198,10 +201,6 @@ def _load_cn(wb, name):
 
 
 def _load_sx(wb, name):
-    """SX Low/High: col mapping
-       [0]=Year [1]=World C/O% [3]=Jan1 [5]=Date [7]=Price [8]=Est
-       Two sections detected via row text.
-    """
     rows = list(wb[name].iter_rows(values_only=True))
     out = []
     section = "Prod ≥ Prev Yr Use"
@@ -235,11 +234,6 @@ def _load_sx(wb, name):
 
 
 def _load_sn(wb, name, is_low):
-    """SN Low/High: col mapping
-       Low:  [1]=Year [6]=C/O% [7]=Price [8]=Est [9]=Date [11]=Jan1
-       High: [0]=Year [5]=C/O% [7]=Price [8]=Est [9]=Date [11]=Jan1
-       Three sections detected via row text.
-    """
     rows = list(wb[name].iter_rows(values_only=True))
     out = []
     section = "No Crop Scare"
@@ -458,103 +452,28 @@ def headline_tile(contract, label, price, pct, top5, kind):
 </div>"""
 
 
-# ─── SIDEBAR ────────────────────────────────────────────────
-LOGO_URL = "https://www.jpsi.com/wp-content/themes/gate39media/img/logo-white.png"
+# ─── READ INPUTS FROM SESSION STATE (with defaults) ─────────
+# Inputs live in the Assumptions tab but are consumed above it in the
+# Overview tab. Reading from session_state here means any change in the
+# Assumptions tab triggers a full re-run with updated values everywhere.
 
-with st.sidebar:
-    st.image(LOGO_URL, width=175)
-    st.markdown(
-        f'<div style="border-bottom:1px solid {DM_BORDER};margin:10px 0 16px;"></div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="sec-div">Current Year Assumptions</div>', unsafe_allow_html=True)
+cz_jan1    = st.session_state.get("cz_jan1",    458.50)
+cz_prod    = st.session_state.get("cz_prod",  15979.0)
+cz_use     = st.session_state.get("cz_use",   16120.0)
+cn_jan1    = st.session_state.get("cn_jan1",    452.00)
+cn_co_raw  = st.session_state.get("cn_co",       12.9)
+sx_jan1    = st.session_state.get("sx_jan1",   1062.75)
+sx_co_raw  = st.session_state.get("sx_co",       28.4)
+sx_section = st.session_state.get("sx_section", "Prod ≥ Prev Yr Use")
+sn_jan1    = st.session_state.get("sn_jan1",   1072.00)
+sn_co_raw  = st.session_state.get("sn_co",       29.5)
+sn_section = st.session_state.get("sn_section", "No Crop Scare")
 
-    # ── CZ Dec Corn ──
-    st.markdown(f'<div style="color:{DM_TEXT};font-weight:600;margin-bottom:4px;">🌽 Dec Corn (CZ25)</div>',
-                unsafe_allow_html=True)
-    cz_jan1 = st.number_input("Jan 1 Price (¢/bu)", value=458.50, step=0.25,
-                               key="cz_jan1", format="%.2f")
-    cz_prod = st.number_input("US Production (Mil Bu)", value=15979.0, step=50.0,
-                               key="cz_prod", format="%.0f")
-    cz_use  = st.number_input("US Usage (Mil Bu)",      value=16120.0, step=50.0,
-                               key="cz_use",  format="%.0f")
-    cz_ratio = cz_prod / cz_use if cz_use else 0.0
-    st.markdown(
-        f'<span class="ratio-badge">Prod/Use: {cz_ratio*100:.2f}% '
-        f'({"Prod ≥ Use" if cz_ratio >= 1 else "Prod < Use"})</span>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(f'<div style="border-bottom:1px solid {DM_BORDER};margin:14px 0;"></div>',
-                unsafe_allow_html=True)
-
-    # ── CN Jul Corn ──
-    st.markdown(f'<div style="color:{DM_TEXT};font-weight:600;margin-bottom:4px;">🌽 Jul Corn (CN26)</div>',
-                unsafe_allow_html=True)
-    cn_jan1   = st.number_input("Jan 1 Price (¢/bu)",  value=452.00, step=0.25,
-                                 key="cn_jan1", format="%.2f")
-    cn_co_raw = st.number_input("Carryout % of Use",   value=12.9,   step=0.1,
-                                 key="cn_co", format="%.1f",
-                                 help="Enter as a percentage, e.g. 12.9 for 12.9%")
-    cn_co_pct = cn_co_raw / 100
-    st.markdown(
-        f'<span class="ratio-badge">C/O Ratio: {cn_co_pct*100:.2f}%</span>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(f'<div style="border-bottom:1px solid {DM_BORDER};margin:14px 0;"></div>',
-                unsafe_allow_html=True)
-
-    # ── SX Nov Soybeans ──
-    st.markdown(f'<div style="color:{DM_TEXT};font-weight:600;margin-bottom:4px;">🫘 Nov Beans (SX25)</div>',
-                unsafe_allow_html=True)
-    sx_jan1   = st.number_input("Jan 1 Price (¢/bu)",     value=1062.75, step=0.25,
-                                 key="sx_jan1", format="%.2f")
-    sx_co_raw = st.number_input("World C/O % of Use",     value=28.4,    step=0.1,
-                                 key="sx_co", format="%.1f",
-                                 help="Enter as a percentage, e.g. 28.4 for 28.4%")
-    sx_co_pct = sx_co_raw / 100
-    sx_section = st.selectbox(
-        "Current Year Category",
-        ["Prod ≥ Prev Yr Use", "Prod < Prev Yr Use"],
-        key="sx_section",
-        help="Is world production this year ≥ or < previous year's use? Highlights (★) matching historical years.",
-    )
-    st.markdown(
-        f'<span class="ratio-badge">World C/O: {sx_co_pct*100:.2f}%</span>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(f'<div style="border-bottom:1px solid {DM_BORDER};margin:14px 0;"></div>',
-                unsafe_allow_html=True)
-
-    # ── SN Jul Soybeans ──
-    st.markdown(f'<div style="color:{DM_TEXT};font-weight:600;margin-bottom:4px;">🫘 Jul Beans (SN26)</div>',
-                unsafe_allow_html=True)
-    sn_jan1   = st.number_input("Jan 1 Price (¢/bu)",     value=1072.00, step=0.25,
-                                 key="sn_jan1", format="%.2f")
-    sn_co_raw = st.number_input("World C/O % of Use",     value=29.5,    step=0.1,
-                                 key="sn_co", format="%.1f",
-                                 help="Enter as a percentage, e.g. 29.5 for 29.5%")
-    sn_co_pct = sn_co_raw / 100
-    sn_section = st.selectbox(
-        "Current Year Category",
-        ["No Crop Scare", "SA Crop Problem", "Crop Scare"],
-        key="sn_section",
-        help="Classify this marketing year — used to highlight (★) matching historical years in the ranked tables.",
-    )
-    st.markdown(
-        f'<span class="ratio-badge">World C/O: {sn_co_pct*100:.2f}%</span>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(f'<div style="border-bottom:1px solid {DM_BORDER};margin:16px 0 8px;"></div>',
-                unsafe_allow_html=True)
-    st.markdown(
-        f'<div style="color:{DM_MUTED};font-size:0.68rem;text-align:center;">'
-        f'Data: USDA NASS &nbsp;·&nbsp; Model by JPSI</div>',
-        unsafe_allow_html=True,
-    )
+cz_ratio  = cz_prod / cz_use if cz_use else 0.0
+cn_co_pct = cn_co_raw / 100
+sx_co_pct = sx_co_raw / 100
+sn_co_pct = sn_co_raw / 100
+cz_section = "Prod ≥ Use" if cz_ratio >= 1 else "Prod < Use"
 
 
 # ─── LOAD DATA ──────────────────────────────────────────────
@@ -571,11 +490,7 @@ except Exception as e:
     st.stop()
 
 
-# ─── CURRENT SECTION LABELS ─────────────────────────────────
-# CZ: auto-determined from ratio
-cz_section = "Prod ≥ Use" if cz_ratio >= 1 else "Prod < Use"
-
-# ─── HEADLINES (all years — no section filtering) ────────────
+# ─── HEADLINE COMPUTATIONS ──────────────────────────────────
 cz_hl_low,  cz_lp,  cz_t5_low  = headline(D["cz_low"],  "ratio",        cz_ratio,  cz_jan1)
 cz_hl_high, cz_hp,  cz_t5_high = headline(D["cz_high"], "ratio",        cz_ratio,  cz_jan1)
 cn_hl_low,  cn_lp,  cn_t5_low  = headline(D["cn_low"],  "carryout_pct", cn_co_pct, cn_jan1)
@@ -587,53 +502,257 @@ sn_hl_high, sn_hp,  sn_t5_high = headline(D["sn_high"], "carryout_pct", sn_co_pc
 
 
 # ─── PAGE HEADER ────────────────────────────────────────────
-st.markdown(
-    f"""
-    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:20px;">
-      <h1 style="margin:0;font-size:1.55rem;font-weight:700;color:{DM_TEXT};">
-        Futures High / Low Forecast Model
-      </h1>
-      <span style="color:{DM_MUTED};font-size:0.85rem;">
-        John Stewart &amp; Partners &nbsp;·&nbsp; Historical Analog Pricing
-      </span>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+LOGO_URL = "https://www.jpsi.com/wp-content/themes/gate39media/img/logo-white.png"
 
-# ─── HEADLINE GRID ──────────────────────────────────────────
-st.markdown('<div class="sec-hdr">📌 Indicated Price Range — Current Marketing Year</div>',
-            unsafe_allow_html=True)
+hdr_l, hdr_r = st.columns([1, 4])
+with hdr_l:
+    st.image(LOGO_URL, width=160)
+with hdr_r:
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:baseline;gap:14px;margin-top:8px;">
+          <h1 style="margin:0;font-size:1.55rem;font-weight:700;color:{DM_TEXT};">
+            Futures High / Low Forecast Model
+          </h1>
+          <span style="color:{DM_MUTED};font-size:0.85rem;">
+            John Stewart &amp; Partners &nbsp;·&nbsp; Historical Analog Pricing
+          </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# Row 1: Lows
-st.markdown('<div class="hl-row-label">📉 Indicated Lows (Median of All Historical Years × Current Jan 1 Price)</div>',
-            unsafe_allow_html=True)
-c1, c2, c3, c4 = st.columns(4)
-c1.markdown(headline_tile("CZ — Dec Corn",  "Jan–Dec Indicated Low",  cz_hl_low,  cz_lp,  cz_t5_low,  "low"),  unsafe_allow_html=True)
-c2.markdown(headline_tile("CN — Jul Corn",  "Jan–Jul Indicated Low",  cn_hl_low,  cn_lp,  cn_t5_low,  "low"),  unsafe_allow_html=True)
-c3.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated Low",  sx_hl_low,  sx_lp,  sx_t5_low,  "low"),  unsafe_allow_html=True)
-c4.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated Low",  sn_hl_low,  sn_lp,  sn_t5_low,  "low"),  unsafe_allow_html=True)
+st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
 
-st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
-
-# Row 2: Highs
-st.markdown('<div class="hl-row-label">📈 Indicated Highs (Median of All Historical Years × Current Jan 1 Price)</div>',
-            unsafe_allow_html=True)
-c1, c2, c3, c4 = st.columns(4)
-c1.markdown(headline_tile("CZ — Dec Corn",  "Jan–Dec Indicated High", cz_hl_high, cz_hp, cz_t5_high, "high"), unsafe_allow_html=True)
-c2.markdown(headline_tile("CN — Jul Corn",  "Jan–Jul Indicated High", cn_hl_high, cn_hp, cn_t5_high, "high"), unsafe_allow_html=True)
-c3.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated High", sx_hl_high, sx_hp, sx_t5_high, "high"), unsafe_allow_html=True)
-c4.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated High", sn_hl_high, sn_hp, sn_t5_high, "high"), unsafe_allow_html=True)
-
-st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
-
-# ─── CONTRACT TABS ──────────────────────────────────────────
-tab_cz, tab_cn, tab_sx, tab_sn = st.tabs([
+# ─── TOP-LEVEL TABS ─────────────────────────────────────────
+tab_ov, tab_inp, tab_cz, tab_cn, tab_sx, tab_sn = st.tabs([
+    "📌  Overview",
+    "⚙️  Assumptions",
     "🌽  Dec Corn (CZ)",
     "🌽  Jul Corn (CN)",
     "🫘  Nov Soybeans (SX)",
     "🫘  Jul Soybeans (SN)",
 ])
+
+
+# ══════════════════════════════════════════════════════════════
+# OVERVIEW TAB — headline price tiles
+# ══════════════════════════════════════════════════════════════
+with tab_ov:
+    st.markdown('<div class="sec-hdr">📌 Indicated Price Range — Current Marketing Year</div>',
+                unsafe_allow_html=True)
+
+    # Row 1: Lows
+    st.markdown(
+        '<div class="hl-row-label">📉 Indicated Lows (Median of All Historical Years × Current Jan 1 Price)</div>',
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown(headline_tile("CZ — Dec Corn",  "Jan–Dec Indicated Low",  cz_hl_low,  cz_lp,  cz_t5_low,  "low"),  unsafe_allow_html=True)
+    c2.markdown(headline_tile("CN — Jul Corn",  "Jan–Jul Indicated Low",  cn_hl_low,  cn_lp,  cn_t5_low,  "low"),  unsafe_allow_html=True)
+    c3.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated Low",  sx_hl_low,  sx_lp,  sx_t5_low,  "low"),  unsafe_allow_html=True)
+    c4.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated Low",  sn_hl_low,  sn_lp,  sn_t5_low,  "low"),  unsafe_allow_html=True)
+
+    st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+    # Row 2: Highs
+    st.markdown(
+        '<div class="hl-row-label">📈 Indicated Highs (Median of All Historical Years × Current Jan 1 Price)</div>',
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown(headline_tile("CZ — Dec Corn",  "Jan–Dec Indicated High", cz_hl_high, cz_hp, cz_t5_high, "high"), unsafe_allow_html=True)
+    c2.markdown(headline_tile("CN — Jul Corn",  "Jan–Jul Indicated High", cn_hl_high, cn_hp, cn_t5_high, "high"), unsafe_allow_html=True)
+    c3.markdown(headline_tile("SX — Nov Beans", "Jan–Nov Indicated High", sx_hl_high, sx_hp, sx_t5_high, "high"), unsafe_allow_html=True)
+    c4.markdown(headline_tile("SN — Jul Beans", "Jan–Jul Indicated High", sn_hl_high, sn_hp, sn_t5_high, "high"), unsafe_allow_html=True)
+
+    st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
+
+    # Current assumptions summary strip
+    st.markdown('<div class="sec-hdr">📋 Current Assumptions Summary</div>', unsafe_allow_html=True)
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.markdown(
+            f'<div class="hl-card" style="text-align:left;">'
+            f'<div class="hl-contract" style="margin-bottom:8px;">🌽 Dec Corn (CZ)</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};">Jan 1 Price</div>'
+            f'<div style="font-size:1.1rem;font-weight:600;color:{DM_TEXT};">${cz_jan1/100:.2f}/bu</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};margin-top:6px;">Prod/Use</div>'
+            f'<div style="font-size:1.0rem;color:{DM_TEXT};">{cz_ratio*100:.2f}%'
+            f' &nbsp;<span style="font-size:0.75rem;color:{JSA_LT if cz_ratio>=1 else COL_RED};">'
+            f'({cz_section})</span></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with s2:
+        st.markdown(
+            f'<div class="hl-card" style="text-align:left;">'
+            f'<div class="hl-contract" style="margin-bottom:8px;">🌽 Jul Corn (CN)</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};">Jan 1 Price</div>'
+            f'<div style="font-size:1.1rem;font-weight:600;color:{DM_TEXT};">${cn_jan1/100:.2f}/bu</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};margin-top:6px;">Carryout / Use</div>'
+            f'<div style="font-size:1.0rem;color:{DM_TEXT};">{cn_co_pct*100:.2f}%</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with s3:
+        sx_color = JSA_LT if "≥" in sx_section else COL_RED
+        st.markdown(
+            f'<div class="hl-card" style="text-align:left;">'
+            f'<div class="hl-contract" style="margin-bottom:8px;">🫘 Nov Beans (SX)</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};">Jan 1 Price</div>'
+            f'<div style="font-size:1.1rem;font-weight:600;color:{DM_TEXT};">${sx_jan1/100:.2f}/bu</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};margin-top:6px;">World C/O / Use</div>'
+            f'<div style="font-size:1.0rem;color:{DM_TEXT};">{sx_co_pct*100:.2f}%'
+            f' &nbsp;<span style="font-size:0.75rem;color:{sx_color};">'
+            f'({sx_section})</span></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with s4:
+        sn_color = {"No Crop Scare": JSA_LT, "SA Crop Problem": COL_GOLD, "Crop Scare": COL_RED}.get(sn_section, DM_MUTED)
+        st.markdown(
+            f'<div class="hl-card" style="text-align:left;">'
+            f'<div class="hl-contract" style="margin-bottom:8px;">🫘 Jul Beans (SN)</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};">Jan 1 Price</div>'
+            f'<div style="font-size:1.1rem;font-weight:600;color:{DM_TEXT};">${sn_jan1/100:.2f}/bu</div>'
+            f'<div style="font-size:0.82rem;color:{DM_MUTED};margin-top:6px;">World C/O / Use</div>'
+            f'<div style="font-size:1.0rem;color:{DM_TEXT};">{sn_co_pct*100:.2f}%'
+            f' &nbsp;<span style="font-size:0.75rem;color:{sn_color};">'
+            f'({sn_section})</span></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════
+# ASSUMPTIONS TAB — all inputs (replaces sidebar)
+# ══════════════════════════════════════════════════════════════
+with tab_inp:
+    st.markdown(
+        f'<div class="sec-hdr">⚙️ Current Year Assumptions</div>'
+        f'<div style="color:{DM_MUTED};font-size:0.82rem;margin-bottom:20px;">'
+        f'Update these values to recalculate all indicated highs and lows across every contract.</div>',
+        unsafe_allow_html=True,
+    )
+
+    col_a, col_b = st.columns(2)
+
+    # ── CZ Dec Corn ──────────────────────────────────────────
+    with col_a:
+        st.markdown(
+            f'<div class="input-card">'
+            f'<div class="input-card-title">🌽 Dec Corn (CZ25)</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        cz_jan1_in = st.number_input(
+            "Jan 1 Price (¢/bu)", value=float(cz_jan1), step=0.25,
+            key="cz_jan1", format="%.2f",
+            help="Futures price on January 1st of the marketing year, in cents/bushel.",
+        )
+        cz_prod_in = st.number_input(
+            "US Production (Mil Bu)", value=float(cz_prod), step=50.0,
+            key="cz_prod", format="%.0f",
+        )
+        cz_use_in = st.number_input(
+            "US Usage (Mil Bu)", value=float(cz_use), step=50.0,
+            key="cz_use", format="%.0f",
+        )
+        _cz_r = cz_prod_in / cz_use_in if cz_use_in else 0.0
+        st.markdown(
+            f'<span class="ratio-badge">Prod/Use: {_cz_r*100:.2f}%'
+            f' &nbsp;·&nbsp; {"Prod ≥ Use" if _cz_r >= 1 else "Prod < Use"}</span>',
+            unsafe_allow_html=True,
+        )
+
+    # ── CN Jul Corn ──────────────────────────────────────────
+    with col_b:
+        st.markdown(
+            f'<div class="input-card">'
+            f'<div class="input-card-title">🌽 Jul Corn (CN26)</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        cn_jan1_in = st.number_input(
+            "Jan 1 Price (¢/bu)", value=float(cn_jan1), step=0.25,
+            key="cn_jan1", format="%.2f",
+        )
+        cn_co_in = st.number_input(
+            "Carryout % of Use", value=float(cn_co_raw), step=0.1,
+            key="cn_co", format="%.1f",
+            help="Enter as a percentage, e.g. 12.9 for 12.9%",
+        )
+        st.markdown(
+            f'<span class="ratio-badge">C/O Ratio: {cn_co_in:.2f}%</span>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div style="height:18px;"></div>', unsafe_allow_html=True)
+    col_c, col_d = st.columns(2)
+
+    # ── SX Nov Soybeans ──────────────────────────────────────
+    with col_c:
+        st.markdown(
+            f'<div class="input-card">'
+            f'<div class="input-card-title">🫘 Nov Soybeans (SX25)</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        sx_jan1_in = st.number_input(
+            "Jan 1 Price (¢/bu)", value=float(sx_jan1), step=0.25,
+            key="sx_jan1", format="%.2f",
+        )
+        sx_co_in = st.number_input(
+            "World C/O % of Use", value=float(sx_co_raw), step=0.1,
+            key="sx_co", format="%.1f",
+            help="Enter as a percentage, e.g. 28.4 for 28.4%",
+        )
+        st.selectbox(
+            "Current Year Category",
+            ["Prod ≥ Prev Yr Use", "Prod < Prev Yr Use"],
+            key="sx_section",
+            help="Is world production this year ≥ or < previous year's use? Highlights (★) matching historical years.",
+        )
+        st.markdown(
+            f'<span class="ratio-badge">World C/O: {sx_co_in:.2f}%</span>',
+            unsafe_allow_html=True,
+        )
+
+    # ── SN Jul Soybeans ──────────────────────────────────────
+    with col_d:
+        st.markdown(
+            f'<div class="input-card">'
+            f'<div class="input-card-title">🫘 Jul Soybeans (SN26)</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        sn_jan1_in = st.number_input(
+            "Jan 1 Price (¢/bu)", value=float(sn_jan1), step=0.25,
+            key="sn_jan1", format="%.2f",
+        )
+        sn_co_in = st.number_input(
+            "World C/O % of Use", value=float(sn_co_raw), step=0.1,
+            key="sn_co", format="%.1f",
+            help="Enter as a percentage, e.g. 29.5 for 29.5%",
+        )
+        st.selectbox(
+            "Current Year Category",
+            ["No Crop Scare", "SA Crop Problem", "Crop Scare"],
+            key="sn_section",
+            help="Classify this marketing year — used to highlight (★) matching historical years in the ranked tables.",
+        )
+        st.markdown(
+            f'<span class="ratio-badge">World C/O: {sn_co_in:.2f}%</span>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        f'<div style="margin-top:24px;color:{DM_MUTED};font-size:0.72rem;text-align:center;">'
+        f'Data: USDA NASS &nbsp;·&nbsp; Model by JPSI &nbsp;·&nbsp; '
+        f'Changes take effect immediately on all tabs.</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ══════════════════════════════════════════════════════════════
