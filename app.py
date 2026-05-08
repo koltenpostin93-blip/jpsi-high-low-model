@@ -463,7 +463,7 @@ def build_seasonal_df(contracts, prefix, delivery_year_filter=None,
 
 
 def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
-                          ind_high_pct=None, ind_low_pct=None, jan1_price=None,
+                          ind_high_price=None, ind_low_price=None, jan1_price=None,
                           show_individual_years=True, height=500):
     """
     MRCI-style seasonal chart: everything plotted in actual $/bu.
@@ -471,6 +471,7 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
     start at the same level.  Averages (full, 5-yr, 15-yr) and current
     year are always shown.
 
+    ind_high_price / ind_low_price: indicated H/L in $/bu (pass directly — no conversion).
     show_individual_years=False → clean averages-only version (no faint year lines).
     """
     # ¢/bu → $/bu conversion factor  (jan1_price is in ¢/bu, e.g. 458.5)
@@ -487,7 +488,7 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
 
     # ── Month-boundary vertical lines (MRCI style) ───────────
     _month_start_doy = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
-    for m_idx in range(1, end_month):          # draw a line before each month except Jan
+    for m_idx in range(1, end_month):
         fig.add_vline(
             x=_month_start_doy[m_idx],
             line_color="rgba(160,140,200,0.20)", line_width=1, line_dash="dot",
@@ -571,6 +572,40 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
             hovertemplate=f"<b>{current_year}</b>  $%{{y:.2f}}/bu<extra></extra>",
         ))
 
+    # ── Compute tight y-range BEFORE adding hlines ───────────
+    # Use the 2nd–98th percentile of rescaled historical data to clip outliers,
+    # then expand to always include: current year, averages, H/L reference lines.
+    rescaled = pct_to_price(hist["price_pct"].dropna())
+    curr_prices = (curr["close_raw"] / 100) if not curr.empty else pd.Series([], dtype=float)
+
+    candidate_y = pd.concat([
+        rescaled,
+        curr_prices,
+        avg_full.dropna(),
+    ], ignore_index=True).dropna()
+
+    if len(candidate_y) > 0:
+        y_lo = float(np.percentile(candidate_y, 2))
+        y_hi = float(np.percentile(candidate_y, 98))
+        # Always include current year actual range
+        if not curr_prices.empty:
+            y_lo = min(y_lo, float(curr_prices.min()))
+            y_hi = max(y_hi, float(curr_prices.max()))
+        # Always include H/L reference lines
+        if ind_high_price is not None:
+            y_hi = max(y_hi, ind_high_price)
+        if ind_low_price is not None:
+            y_lo = min(y_lo, ind_low_price)
+        # Include Jan 1 baseline
+        jan1_dollar = (jan1_price or 100) / 100
+        y_lo = min(y_lo, jan1_dollar)
+        y_hi = max(y_hi, jan1_dollar)
+        pad = (y_hi - y_lo) * 0.09
+        y_range = [y_lo - pad, y_hi + pad]
+    else:
+        jan1_dollar = (jan1_price or 100) / 100
+        y_range = [jan1_dollar * 0.85, jan1_dollar * 1.20]
+
     # ── Today vertical band ───────────────────────────────────
     today_doy = datetime.now().timetuple().tm_yday
     fig.add_vrect(
@@ -590,40 +625,21 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
         annotation_font=dict(color=DM_MUTED, size=9),
     )
 
-    # ── Indicated H/L lines ───────────────────────────────────
-    # ind_*_pct is price_pct scale (100 = Jan 1).  Convert: price_pct * j = $/bu
-    if ind_high_pct is not None:
-        ind_high_price = ind_high_pct * j          # FIX: was /100 * j (wrong)
+    # ── Indicated H/L lines — passed directly in $/bu ────────
+    if ind_high_price is not None:
         fig.add_hline(
             y=ind_high_price, line_dash="dash", line_color=COL_HIGH, line_width=1.8,
             annotation_text=f" Ind. High  ${ind_high_price:.2f}",
             annotation_position="right",
             annotation_font=dict(color=COL_HIGH, size=10),
         )
-    if ind_low_pct is not None:
-        ind_low_price = ind_low_pct * j            # FIX: was /100 * j (wrong)
+    if ind_low_price is not None:
         fig.add_hline(
             y=ind_low_price, line_dash="dash", line_color=COL_LOW, line_width=1.8,
             annotation_text=f" Ind. Low  ${ind_low_price:.2f}",
             annotation_position="right",
             annotation_font=dict(color=COL_LOW, size=10),
         )
-
-    # ── Auto-scale y-axis to data ─────────────────────────────
-    all_y = []
-    all_y.extend(pct_to_price(hist["price_pct"]).tolist())
-    if not curr.empty:
-        all_y.extend((curr["close_raw"] / 100).tolist())
-    if ind_high_pct is not None:
-        all_y.append(ind_high_pct * j)
-    if ind_low_pct is not None:
-        all_y.append(ind_low_pct * j)
-    if all_y:
-        y_min, y_max = min(all_y), max(all_y)
-        pad = (y_max - y_min) * 0.07
-        y_range = [y_min - pad, y_max + pad]
-    else:
-        y_range = None
 
     # ── Axes & layout ─────────────────────────────────────────
     _all_doys  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
@@ -646,6 +662,7 @@ def make_seasonal_overlay(seasonal_df, current_year, title, end_month=12,
             title="Price ($/bu)", gridcolor=DM_BORDER, color=DM_MUTED,
             zeroline=False, tickprefix="$",
             range=y_range,
+            autorange=False,          # prevent add_hline from resetting range
         ),
         legend=dict(bgcolor=DM_SURFACE, bordercolor=DM_BORDER, borderwidth=1,
                     font=dict(color=DM_TEXT, size=10)),
@@ -1510,12 +1527,12 @@ with tab_seas:
         st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
 
         # ── Config per contract ───────────────────────────────
-        # ind_*_pct = price_pct scale (100 = Jan 1).
-        # July contracts use the primary ZCN/ZSN tickers where available,
-        # then fall back to ZCZ/ZSZ filtered to end_month for older years.
-        def _hl_pct(price, jan1):
-            """Indicated price (¢/bu) → price_pct (100 = Jan 1)."""
-            return price / jan1 * 100 if (price and jan1) else None
+        # ind_high_price / ind_low_price are passed directly in $/bu
+        # (headline returns ¢/bu → divide by 100).
+        # July contracts fall back to ZCZ/ZSZ filtered to end_month for older years.
+        def _to_dollar(cents):
+            """¢/bu headline price → $/bu, or None if unavailable."""
+            return round(cents / 100, 4) if cents else None
 
         SEAS_CONFIG = {
             "🌽 Dec Corn (CZ26)": dict(
@@ -1524,8 +1541,8 @@ with tab_seas:
                 current_year=2026,
                 title="Dec Corn (CZ26) — Seasonal Price Pattern",
                 end_month=12, jan1_price=cz_jan1,
-                ind_high_pct=_hl_pct(cz_hl_high, cz_jan1),
-                ind_low_pct =_hl_pct(cz_hl_low,  cz_jan1),
+                ind_high_price=_to_dollar(cz_hl_high),
+                ind_low_price =_to_dollar(cz_hl_low),
             ),
             "🌽 Jul Corn (CN26)": dict(
                 contracts=PH["corn"], prefix="ZCN",
@@ -1533,8 +1550,8 @@ with tab_seas:
                 current_year=2026,
                 title="Jul Corn (CN26) — Seasonal Price Pattern",
                 end_month=7, jan1_price=cn_jan1,
-                ind_high_pct=_hl_pct(cn_hl_high, cn_jan1),
-                ind_low_pct =_hl_pct(cn_hl_low,  cn_jan1),
+                ind_high_price=_to_dollar(cn_hl_high),
+                ind_low_price =_to_dollar(cn_hl_low),
             ),
             "🫘 Nov Soybeans (SX26)": dict(
                 contracts=PH["soy"], prefix="ZSX",
@@ -1542,8 +1559,8 @@ with tab_seas:
                 current_year=2026,
                 title="Nov Soybeans (SX26) — Seasonal Price Pattern",
                 end_month=11, jan1_price=sx_jan1,
-                ind_high_pct=_hl_pct(sx_hl_high, sx_jan1),
-                ind_low_pct =_hl_pct(sx_hl_low,  sx_jan1),
+                ind_high_price=_to_dollar(sx_hl_high),
+                ind_low_price =_to_dollar(sx_hl_low),
             ),
             "🫘 Jul Soybeans (SN26)": dict(
                 contracts=PH["soy"], prefix="ZSN",
@@ -1551,8 +1568,8 @@ with tab_seas:
                 current_year=2026,
                 title="Jul Soybeans (SN26) — Seasonal Price Pattern",
                 end_month=7, jan1_price=sn_jan1,
-                ind_high_pct=_hl_pct(sn_hl_high, sn_jan1),
-                ind_low_pct =_hl_pct(sn_hl_low,  sn_jan1),
+                ind_high_price=_to_dollar(sn_hl_high),
+                ind_low_price =_to_dollar(sn_hl_low),
             ),
         }
 
@@ -1599,8 +1616,8 @@ with tab_seas:
                     seas_df, cfg["current_year"],
                     cfg["title"] + "  ·  Averages & Current Year",
                     end_month=cfg["end_month"],
-                    ind_high_pct=cfg.get("ind_high_pct"),
-                    ind_low_pct=cfg.get("ind_low_pct"),
+                    ind_high_price=cfg.get("ind_high_price"),
+                    ind_low_price=cfg.get("ind_low_price"),
                     jan1_price=cfg.get("jan1_price"),
                     show_individual_years=False,
                     height=540,
@@ -1618,8 +1635,8 @@ with tab_seas:
                 make_seasonal_overlay(
                     seas_df, cfg["current_year"], cfg["title"],
                     end_month=cfg["end_month"],
-                    ind_high_pct=cfg.get("ind_high_pct"),
-                    ind_low_pct=cfg.get("ind_low_pct"),
+                    ind_high_price=cfg.get("ind_high_price"),
+                    ind_low_price=cfg.get("ind_low_price"),
                     jan1_price=cfg.get("jan1_price"),
                     show_individual_years=True,
                     height=500,
